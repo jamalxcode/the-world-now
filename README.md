@@ -27,13 +27,38 @@
 
 ```
 the-world-now/
-├── 📄 index.html            ← App entry point
+├── 📄 index.html               ← App entry point
+├── 📄 config.json              ← Editable sources config (no rebuild needed)
 ├── 📁 assets/
-│   ├── 🧠 index-CWK2qwGY.js   ← Bundled React app (Vite output)
-│   └── 🎨 index-DvRa00He.css  ← Compiled styles
-├── 📁 fonts/                ← Custom typography
-└── 🌐 CNAME                 ← Custom domain config
+│   ├── 🧠 index-pBGzX7_c.js   ← Bundled React app (Vite output)
+│   └── 🎨 index-eCIea8pR.css  ← Compiled styles
+└── 🌐 CNAME                    ← Custom domain config
 ```
+
+---
+
+## 📡 Sources & Configuration
+
+News sources are controlled via **`config.json`** — edit it directly without rebuilding.
+
+### Nitter / Twitter Accounts
+100+ accounts across global news, finance, geopolitics, and conflict monitoring — including NYT, BBC, Reuters, AP, Al Jazeera, CNN, FRANCE24, Fox, WSJ, FT, Bloomberg, The Economist, and OSINT/conflict trackers like `OSINTdefender`, `KyivIndependent`, `sentdefender`, and more.
+
+### Reddit Subreddits
+`worldnews` · `news` · `technology` · `science` · `business` · `geopolitics`
+
+### Nitter Instances (fallback chain)
+- `https://rss.xcancel.com`
+- `https://xcancel.com`
+- `https://nitter.privacydev.net`
+
+### Config Options
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `nitter_sample_size` | `8` | Accounts sampled per refresh |
+| `fetch_timeout_ms` | `15000` | Per-source fetch timeout |
+| `target_item_count` | `80` | Total feed items to display |
 
 ---
 
@@ -70,8 +95,6 @@ npm run build
 
 ## 🌐 Live Demo
 
-The app is live and deployed via **GitHub Pages** with 6 deployments and counting:
-
 👉 **[jamalxcode.github.io/the-world-now](https://jamalxcode.github.io/the-world-now)**
 
 ---
@@ -83,7 +106,7 @@ The app is live and deployed via **GitHub Pages** with 6 deployments and countin
 | ⚛️ UI Framework | React 19.2.3 |
 | ⚡ Build Tool | Vite |
 | 🎨 Styling | CSS (compiled) |
-| 🔤 Fonts | Custom (local) |
+| 📡 Feed Sources | Nitter RSS + Reddit JSON |
 | 🚀 Deployment | GitHub Pages |
 | 🌐 Language | HTML / JavaScript |
 
@@ -96,6 +119,7 @@ This project is configured for **GitHub Pages** auto-deployment.
 - A `CNAME` file is present for custom domain support
 - Assets are pre-bundled — no server needed
 - Deployments trigger automatically on push to `main`
+- Sources can be updated via `config.json` without a rebuild
 
 ---
 
