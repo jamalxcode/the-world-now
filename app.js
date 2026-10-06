@@ -327,7 +327,7 @@ function rowHTML({ item, related }, idx) {
     const label = related.length ? (open ? "Hide " : "+") + related.length + " report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
   }
-  if (state.links) h += videoLinks(item.title);
+  if (state.links) h += videoLinks(item, related);
   h += "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
@@ -354,7 +354,7 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   if (open) {
     h += '<div class="c-open">';
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
-    if (state.links) h += '<div class="actions">' + videoLinks(item.title) + "</div>";
+    if (state.links) h += '<div class="actions">' + videoLinks(item, related) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
         '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
@@ -369,9 +369,13 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
 // that it often finds nothing. Each link asks for the newest results where the site allows it.
 // The number is how many keywords each site gets: Bilibili is much smaller, so on a fresh story
 // 3 words mostly match nothing or old videos, while the 2 strongest ("Nobel Prize") find something.
+// YouTube no longer sorts by date (even its "Recently uploaded" chip ranks by relevance), so the link
+// picks an upload-date filter: "last hour" puts live streams and minutes-old uploads first on a hot story
+// but finds nothing on a quiet one, so quiet or older stories get "this week" instead.
+const YT_HOUR = "EgIIAQ%253D%253D", YT_WEEK = "EgIIAw%253D%253D";
 const SEARCH_LINKS = [
   ["X", 4, (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
-  ["YouTube", 4, (q) => "https://www.youtube.com/results?search_query=" + q + "&sp=EgIIAw%253D%253D"], // uploaded this week; YouTube no longer sorts by date
+  ["YouTube", 4, (q, hot) => "https://www.youtube.com/results?search_query=" + q + "&sp=" + (hot ? YT_HOUR : YT_WEEK)],
   ["Google News", 4, (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
   ["Yandex Video", 4, (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
   ["Bilibili", 2, (q) => "https://www.bilibili.tv/en/search-result?q=" + q], // relevance only: no newest-first option in its links
@@ -422,9 +426,14 @@ function searchQuery(title, max = 4) {
 }
 const WEAK_OPENERS = new Set("former green red orange yellow amber new top big major senior acting interim early late deadly fatal huge massive second third final key".split(" "));
 
-function videoLinks(title) {
-  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, max, url]) =>
-    '<a href="' + esc(url(searchQuery(title, max))) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
+// A story is "hot" when 2+ sources report it (or it's breaking) and it's under 3 hours old.
+function videoLinks(item, related = []) {
+  const age = Date.now() - Date.parse(item.published);
+  const hot = age < 3 * 3600e3 && (related.length >= 1 || state.breakingIds.has(item.id));
+  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, max, url]) => {
+    const tip = name === "YouTube" ? ' title="' + (hot ? "Uploaded in the last hour (busy story)" : "Uploaded this week") + '"' : "";
+    return '<a href="' + esc(url(searchQuery(item.title, max), hot)) + '" target="_blank" rel="noopener"' + tip + ">" + name + "</a>";
+  }).join("") + "</span>";
 }
 
 function renderStaged(n) {
