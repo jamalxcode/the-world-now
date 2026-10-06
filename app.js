@@ -3,7 +3,7 @@
 "use strict";
 
 const CATS = [
-  ["all", "All"], ["top", "Top"], ["world", "World"], ["mideast", "Middle East"], ["osint", "OSINT"],
+  ["all", "All"], ["video", "📺 Videos"], ["top", "Top"], ["world", "World"], ["mideast", "Middle East"], ["osint", "OSINT"],
   ["defense", "Defense"], ["biz", "Business"], ["tech", "Tech"], ["hazard", "Hazards"], ["science", "Science"],
 ];
 const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last back news live update updates latest video watch report reports breaking urgent according officials official people told january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
@@ -283,7 +283,7 @@ function notifyBreaking() {
 function filtered() {
   const q = state.query.trim().toLowerCase();
   return state.items.filter((i) =>
-    (state.cat === "all" || i.category === state.cat) &&
+    (state.cat === "all" || (state.cat === "video" ? i.media === "video" : i.category === state.cat)) &&
     (!state.source || i.source === state.source) &&
     (!q || i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q) || (i.summary || "").toLowerCase().includes(q)));
 }
@@ -306,7 +306,8 @@ function render() {
 
 function srcHTML(item, tag) {
   return "<" + tag + ' class="src" data-src="' + esc(item.source) + '" style="--h:' + srcHue(item.source) + '" title="Show only ' + esc(item.source) + '">' + esc(item.source) + "</" + tag + ">" +
-    (item.social ? ' <span class="plat" title="Social post, unverified">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>" : "");
+    (item.social ? ' <span class="plat" title="Social post, unverified">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>"
+      : item.id.startsWith("yt-") ? ' <span class="plat" title="Video from the outlet\'s YouTube channel">YT</span>' : "");
 }
 
 function rowHTML({ item, related }, idx) {
@@ -452,7 +453,7 @@ function renderCats() {
 
 function renderCatCounts() {
   const counts = {};
-  for (const i of state.items) counts[i.category] = (counts[i.category] || 0) + 1;
+  for (const i of state.items) { counts[i.category] = (counts[i.category] || 0) + 1; if (i.media === "video") counts.video = (counts.video || 0) + 1; }
   document.querySelectorAll("#cats button").forEach((b) => {
     const k = b.dataset.cat;
     b.querySelector(".n").textContent = k === "all" ? "" : counts[k] || 0;
@@ -508,7 +509,7 @@ function sourcesHTML() {
   const failing = d.sources.filter((s) => !s.ok).length, quiet = d.sources.filter((s) => s.ok && !s.count).length;
   return "<h2>Sources · " + (d.sources_total - failing) + " of " + d.sources_total + " working" + (quiet ? " (" + quiet + " quiet)" : "") + ' <span class="count">· updated ' + timeAgo(d.generated_at) + " ago</span></h2>" +
     '<div class="src-list">' + rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "q-c") + '" title="' + (!s.ok ? "failing" : s.count ? "working" : "quiet") + '">' + (!s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
-      (s.type ? ' <span class="plat">' + (s.type === "telegram" ? "TG" : "BSKY") + "</span>" : "") +
+      (s.type ? ' <span class="plat">' + ({ telegram: "TG", bluesky: "BSKY", youtube: "YT" }[s.type] || s.type) + "</span>" : "") +
       '</span><span class="count">' + esc(catLabel(s.category)) + '</span><span class="num">' + s.count + "</span>" + (s.error ? '<span class="err">' + esc(s.error) + "</span>" : "") + "</div>").join("") + "</div>";
 }
 

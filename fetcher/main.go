@@ -30,9 +30,9 @@ const userAgent = "Mozilla/5.0 (compatible; TheWorldNow/2.0; +https://news.sala.
 
 type Source struct {
 	Name       string `json:"name"`
-	Type       string `json:"type,omitempty"` // "" (RSS/Atom), "telegram" or "bluesky"
+	Type       string `json:"type,omitempty"` // "" (RSS/Atom), "telegram", "bluesky" or "youtube"
 	URL        string `json:"url,omitempty"`
-	Channel    string `json:"channel,omitempty"` // telegram: public channel name
+	Channel    string `json:"channel,omitempty"` // telegram: public channel name; youtube: channel ID (UC…)
 	Handle     string `json:"handle,omitempty"`  // bluesky: account handle
 	Category   string `json:"category"`
 	Aggregator bool   `json:"aggregator,omitempty"` // items name their own outlet in <source>
@@ -237,6 +237,21 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		if body, err = get(client, u, "application/json"); err == nil {
 			entries, err = parseBluesky(body, src.Handle)
 		}
+	case "youtube":
+		// YouTube has no search feed, but every channel has a public Atom feed of its latest ~15 videos.
+		var body []byte
+		if body, err = get(client, "https://www.youtube.com/feeds/videos.xml?channel_id="+url.QueryEscape(src.Channel), "application/atom+xml"); err == nil {
+			entries, err = parseFeed(body)
+		}
+		for i := range entries {
+			entries[i].media = "video"
+			if m := ytIDRE.FindStringSubmatch(entries[i].url); m != nil {
+				entries[i].id = "yt-" + m[1]
+			}
+		}
+		if limit > 10 { // news channels post all day; keep them from crowding out text reports
+			limit = 10
+		}
 	default:
 		var body []byte
 		if body, err = get(client, src.URL, "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8"); err == nil {
@@ -373,6 +388,8 @@ func splitPost(text string) (title, summary string) {
 	}
 	return title, truncate(strings.TrimSpace(rest), 280)
 }
+
+var ytIDRE = regexp.MustCompile(`(?:v=|/shorts/|youtu\.be/)([A-Za-z0-9_-]{11})`)
 
 var (
 	postURLRE  = regexp.MustCompile(`(?i)(https?://\S+|\b[a-z0-9-]+\.(rs|com|org|net|co|ly|gl|me|news|io|tv|uk)/\S*)`)
