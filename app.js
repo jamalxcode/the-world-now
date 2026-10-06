@@ -367,12 +367,14 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
 
 // Search links use a few keywords, not the whole headline: a full headline is so literal
 // that it often finds nothing. Each link asks for the newest results where the site allows it.
+// The number is how many keywords each site gets: Rumble has far fewer uploads, so on a fresh story
+// 3 words mostly match old videos, while the 2 strongest ("Nobel Prize") find this week's.
 const SEARCH_LINKS = [
-  ["X", (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
-  ["YouTube", (q) => "https://www.youtube.com/results?search_query=" + q + "&sp=EgIIAw%253D%253D"], // uploaded this week; YouTube no longer sorts by date
-  ["Google News", (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
-  ["Rumble", (q) => "https://rumble.com/search/video?q=" + q + "&sort=date"], // newest first
-  ["Yandex", (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
+  ["X", 4, (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
+  ["YouTube", 4, (q) => "https://www.youtube.com/results?search_query=" + q + "&sp=EgIIAw%253D%253D"], // uploaded this week; YouTube no longer sorts by date
+  ["Google News", 4, (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
+  ["Rumble", 2, (q) => "https://rumble.com/search/video?q=" + q + "&sort=date"], // newest first
+  ["Yandex", 4, (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
 ];
 // Filler words and weak verbs that make a search too literal.
 const SEARCH_STOP = new Set(("the and for are was were has had have his her its our not but all any can out who how why what when where new one two " +
@@ -385,7 +387,8 @@ const SEARCH_STOP = new Set(("the and for are was were has had have his her its 
 // Keywords for search: the names in the headline (capitalised words) topped up with its first ordinary
 // keywords, in headline order: 3 words, or 4 when there are 3 names.
 // "Italy regulator probes AI music startup Suno over terms of service" → "Italy regulator Suno".
-function searchQuery(title) {
+// With max = 2 it keeps the two strongest: the first two names if there are two, else the first two picks.
+function searchQuery(title, max = 4) {
   const seen = new Set();
   const words = title.replace(/@\w+/g, " ").replace(/[’']s\b/g, "").replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/)
     .filter((w) => {
@@ -394,7 +397,7 @@ function searchQuery(title) {
       seen.add(k);
       return true;
     });
-  if (!words.length) return encodeURIComponent(title.split(/\s+/).slice(0, 4).join(" "));
+  if (!words.length) return encodeURIComponent(title.split(/\s+/).slice(0, max).join(" "));
   const isName = (w) => /^\p{Lu}/u.test(w);
   const names = words.filter(isName);
   let pick;
@@ -405,12 +408,23 @@ function searchQuery(title) {
     for (const w of words) if (keep.size < target && !isName(w)) keep.add(w);
     pick = words.filter((w) => keep.has(w));
   }
+  if (pick.length > max) {
+    // The headline's first word is capitalised anyway; common openers ("Former", "Green") aren't names.
+    const opener = (w) => w === words[0] && WEAK_OPENERS.has(w.toLowerCase());
+    const strong = pick.filter((w) => isName(w) && !opener(w));
+    if (strong.length >= max) pick = strong.slice(0, max);
+    else if (strong.length) {
+      const extra = pick.filter((w) => !strong.includes(w) && !opener(w)).slice(0, max - strong.length);
+      pick = pick.filter((w) => strong.includes(w) || extra.includes(w));
+    } else pick = pick.slice(0, max);
+  }
   return encodeURIComponent(pick.join(" "));
 }
+const WEAK_OPENERS = new Set("former green red orange yellow amber new top big major senior acting interim early late deadly fatal huge massive second third final key".split(" "));
 
 function videoLinks(title) {
-  const q = searchQuery(title);
-  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, url]) => '<a href="' + esc(url(q)) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
+  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, max, url]) =>
+    '<a href="' + esc(url(searchQuery(title, max))) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
 }
 
 function renderStaged(n) {
