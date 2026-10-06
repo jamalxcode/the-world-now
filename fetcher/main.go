@@ -244,6 +244,9 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 	if err != nil {
 		return nil, err
 	}
+	if social && limit > 15 { // chatty channels would otherwise flood the feed
+		limit = 15
+	}
 
 	var items []Item
 	undated := 0
@@ -330,6 +333,8 @@ func cleanText(s string) string {
 // splitPost turns a social post into a headline (its first line or sentence)
 // and a summary (the rest).
 func splitPost(text string) (title, summary string) {
+	text = postURLRE.ReplaceAllString(text, "")
+	defer func() { title = tidyPostTitle(title) }()
 	var lines []string
 	for _, l := range strings.Split(text, "\n") {
 		if l = strings.TrimSpace(spaceRE.ReplaceAllString(l, " ")); l != "" {
@@ -361,6 +366,21 @@ func splitPost(text string) (title, summary string) {
 		}
 	}
 	return title, truncate(strings.TrimSpace(rest), 280)
+}
+
+var (
+	postURLRE  = regexp.MustCompile(`(?i)(https?://\S+|\b[a-z0-9-]+\.(rs|com|org|net|co|ly|gl|me|news|io|tv|uk)/\S*)`)
+	leadSymRE  = regexp.MustCompile(`^[^\p{L}\p{N}"'“(#]+`)
+	breakingRE = regexp.MustCompile(`(?i)^#?(breaking|urgent|just in|flash)\b\s*[:\-–—|]*\s*`)
+	hashtagRE  = regexp.MustCompile(`#(\p{L})`)
+)
+
+// tidyPostTitle drops the emoji/flag/"BREAKING" decoration social posts lead with.
+func tidyPostTitle(t string) string {
+	for i := 0; i < 3; i++ {
+		t = breakingRE.ReplaceAllString(leadSymRE.ReplaceAllString(t, ""), "")
+	}
+	return strings.TrimSpace(hashtagRE.ReplaceAllString(t, "$1"))
 }
 
 func normTitle(s string) string {

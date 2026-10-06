@@ -122,9 +122,21 @@ function bskyItem(it, src) {
   return { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
 }
 
+// Mirrors splitPost/tidyPostTitle in fetcher/main.go.
 function splitPost(text) {
+  text = text.replace(/(https?:\/\/\S+|\b[a-z0-9-]+\.(rs|com|org|net|co|ly|gl|me|news|io|tv|uk)\/\S*)/gi, "");
   const lines = text.split("\n").map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (!lines.length) return ["", ""];
+  const [t, r] = splitLines(lines);
+  return [tidyPostTitle(t), r];
+}
+
+function tidyPostTitle(t) {
+  for (let i = 0; i < 3; i++) t = t.replace(/^[^\p{L}\p{N}"'“(#]+/u, "").replace(/^#?(breaking|urgent|just in|flash)\b\s*[:\-–—|]*\s*/i, "");
+  return t.replace(/#(\p{L})/gu, "$1").trim();
+}
+
+function splitLines(lines) {
   let title = lines[0], rest = lines.slice(1).join(" ");
   if (title.length < 25 && rest) { title += " " + rest; rest = ""; }
   if (title.length > 220) {
