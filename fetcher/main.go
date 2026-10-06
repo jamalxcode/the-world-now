@@ -1,15 +1,14 @@
-// Command fetcher downloads the public RSS/Atom feeds listed in sources.json
-// and writes a single feed.json for the static site to read. It uses only the
-// Go standard library, so the GitHub Action needs nothing but a Go toolchain.
+// Command fetcher downloads the public feeds listed in sources.json (RSS/Atom,
+// public Telegram channels and public Bluesky accounts) and writes a single
+// feed.json for the static site to read. It uses only the Go standard library,
+// so the GitHub Action needs nothing but a Go toolchain.
 package main
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,7 +30,10 @@ const userAgent = "Mozilla/5.0 (compatible; TheWorldNow/2.0; +https://news.sala.
 
 type Source struct {
 	Name       string `json:"name"`
-	URL        string `json:"url"`
+	Type       string `json:"type,omitempty"` // "" (RSS/Atom), "telegram" or "bluesky"
+	URL        string `json:"url,omitempty"`
+	Channel    string `json:"channel,omitempty"` // telegram: public channel name
+	Handle     string `json:"handle,omitempty"`  // bluesky: account handle
 	Category   string `json:"category"`
 	Aggregator bool   `json:"aggregator,omitempty"` // items name their own outlet in <source>
 }
@@ -53,17 +55,32 @@ type Item struct {
 	Category  string `json:"category"`
 	Published string `json:"published"`
 	Summary   string `json:"summary,omitempty"`
+	Social    bool   `json:"social,omitempty"`
 
 	t time.Time
+}
+
+// entry is a parsed item before filtering, whatever the source type.
+type entry struct {
+	id, title, url, summary, outlet string
+	t                               time.Time
 }
 
 type SourceStatus struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
+	Type     string `json:"type,omitempty"`
 	OK       bool   `json:"ok"`
 	Count    int    `json:"count"`
 	Error    string `json:"error,omitempty"`
 	MS       int64  `json:"ms"`
+}
+
+// LiveSource is a Bluesky account the browser may poll directly between builds.
+type LiveSource struct {
+	Name     string `json:"name"`
+	Handle   string `json:"handle"`
+	Category string `json:"category"`
 }
 
 type Output struct {
@@ -71,29 +88,8 @@ type Output struct {
 	SourcesOK   int            `json:"sources_ok"`
 	SourcesAll  int            `json:"sources_total"`
 	Sources     []SourceStatus `json:"sources"`
+	Live        []LiveSource   `json:"live"`
 	Items       []Item         `json:"items"`
-}
-
-// xmlItem covers RSS 2.0 <item>, RSS 1.0 (RDF) <item> and Atom <entry>.
-// encoding/xml matches on local names, so dc:date, content:encoded etc. land here too.
-type xmlItem struct {
-	Title       string    `xml:"title"`
-	Links       []xmlLink `xml:"link"`
-	GUID        string    `xml:"guid"`
-	ID          string    `xml:"id"`
-	PubDate     string    `xml:"pubDate"`
-	Published   string    `xml:"published"`
-	Updated     string    `xml:"updated"`
-	Date        string    `xml:"date"`
-	Description string    `xml:"description"`
-	Summary     string    `xml:"summary"`
-	Source      string    `xml:"source"`
-}
-
-type xmlLink struct {
-	Href string `xml:"href,attr"`
-	Rel  string `xml:"rel,attr"`
-	Text string `xml:",chardata"`
 }
 
 func main() {
@@ -118,15 +114,14 @@ func main() {
 	if cfg.PerSourceLimit == 0 {
 		cfg.PerSourceLimit = 40
 	}
-
-	now := time.Now().UTC()
-	cutoff := now.Add(-time.Duration(cfg.MaxAgeHours) * time.Hour)
-	// Force HTTP/1.1: a few CDNs (CBC, NHK) reset Go's HTTP/2 streams.
 	var exclude []*regexp.Regexp
 	for _, p := range cfg.Exclude {
 		exclude = append(exclude, regexp.MustCompile(p))
 	}
 
+	now := time.Now().UTC()
+	cutoff := now.Add(-time.Duration(cfg.MaxAgeHours) * time.Hour)
+	// Force HTTP/1.1: a few CDNs reset Go's HTTP/2 streams.
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
 		Proxy:        http.ProxyFromEnvironment,
 		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
@@ -134,7 +129,7 @@ func main() {
 
 	statuses := make([]SourceStatus, len(cfg.Sources))
 	results := make([][]Item, len(cfg.Sources))
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, 12)
 	var wg sync.WaitGroup
 	for i, src := range cfg.Sources {
 		wg.Add(1)
@@ -144,7 +139,7 @@ func main() {
 			defer func() { <-sem }()
 			start := time.Now()
 			items, err := fetchSource(client, src, cutoff, now, cfg.PerSourceLimit, exclude)
-			st := SourceStatus{Name: src.Name, Category: src.Category, MS: time.Since(start).Milliseconds()}
+			st := SourceStatus{Name: src.Name, Category: src.Category, Type: src.Type, MS: time.Since(start).Milliseconds()}
 			if err != nil {
 				st.Error = err.Error()
 			} else if len(items) == 0 {
@@ -179,12 +174,19 @@ func main() {
 		all = all[:cfg.MaxItems]
 	}
 
+	var live []LiveSource
+	for _, src := range cfg.Sources {
+		if src.Type == "bluesky" {
+			live = append(live, LiveSource{Name: src.Name, Handle: src.Handle, Category: src.Category})
+		}
+	}
+
 	for _, st := range statuses {
 		mark := "ok  "
 		if !st.OK {
 			mark = "FAIL"
 		}
-		log.Printf("%s %-22s %3d items %5dms %s", mark, st.Name, st.Count, st.MS, st.Error)
+		log.Printf("%s %-24s %3d items %5dms %s", mark, st.Name, st.Count, st.MS, st.Error)
 	}
 	log.Printf("%d/%d sources ok, %d items", ok, len(cfg.Sources), len(all))
 
@@ -199,6 +201,7 @@ func main() {
 		SourcesOK:   ok,
 		SourcesAll:  len(cfg.Sources),
 		Sources:     statuses,
+		Live:        live,
 		Items:       all,
 	}
 	buf, err := json.Marshal(out)
@@ -211,12 +214,83 @@ func main() {
 }
 
 func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit int, exclude []*regexp.Regexp) ([]Item, error) {
-	req, err := http.NewRequest("GET", src.URL, nil)
+	var (
+		entries []entry
+		err     error
+		social  bool
+	)
+	switch src.Type {
+	case "telegram":
+		social = true
+		var body []byte
+		if body, err = get(client, "https://t.me/s/"+src.Channel, "text/html"); err == nil {
+			entries, err = parseTelegram(body)
+		}
+	case "bluesky":
+		social = true
+		var body []byte
+		u := "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=40&actor=" + url.QueryEscape(src.Handle)
+		if body, err = get(client, u, "application/json"); err == nil {
+			entries, err = parseBluesky(body, src.Handle)
+		}
+	default:
+		var body []byte
+		if body, err = get(client, src.URL, "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8"); err == nil {
+			entries, err = parseFeed(body)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var items []Item
+	for _, e := range entries {
+		if e.title == "" || e.url == "" || matchesAny(exclude, e.title) {
+			continue
+		}
+		if e.t.IsZero() || e.t.Before(cutoff) {
+			continue
+		}
+		if e.t.After(now) { // some feeds stamp items in the future
+			e.t = now
+		}
+		name := src.Name
+		if src.Aggregator && e.outlet != "" {
+			name = e.outlet
+			e.title = strings.TrimSuffix(e.title, " - "+e.outlet)
+		}
+		if strings.EqualFold(e.summary, e.title) {
+			e.summary = ""
+		}
+		id := e.id
+		if id == "" {
+			id = hash(e.url)
+		}
+		items = append(items, Item{
+			ID:        id,
+			Title:     e.title,
+			URL:       e.url,
+			Source:    name,
+			Category:  src.Category,
+			Published: e.t.UTC().Format(time.RFC3339),
+			Summary:   e.summary,
+			Social:    social,
+			t:         e.t,
+		})
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
+}
+
+func get(client *http.Client, u, accept string) ([]byte, error) {
+	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8")
+	req.Header.Set("Accept", accept)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, shortErr(err)
@@ -229,152 +303,12 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 	if err != nil {
 		return nil, shortErr(err)
 	}
-	raws, err := parseFeed(body)
-	if err != nil {
-		return nil, err
-	}
-
-	var items []Item
-	for _, r := range raws {
-		title := cleanText(r.Title)
-		link := pickLink(r)
-		if title == "" || link == "" {
-			continue
-		}
-		if matchesAny(exclude, title) {
-			continue
-		}
-		t := parseDate(firstNonEmpty(r.PubDate, r.Published, r.Date, r.Updated))
-		if t.IsZero() || t.Before(cutoff) {
-			continue
-		}
-		if t.After(now) { // some feeds stamp items in the future
-			t = now
-		}
-		name := src.Name
-		if src.Aggregator {
-			if outlet := cleanText(r.Source); outlet != "" {
-				name = outlet
-				title = strings.TrimSuffix(title, " - "+outlet)
-			}
-		}
-		summary := truncate(cleanText(firstNonEmpty(r.Description, r.Summary)), 280)
-		if strings.EqualFold(summary, title) {
-			summary = ""
-		}
-		items = append(items, Item{
-			ID:        hash(link),
-			Title:     title,
-			URL:       link,
-			Source:    name,
-			Category:  src.Category,
-			Published: t.UTC().Format(time.RFC3339),
-			Summary:   summary,
-			t:         t,
-		})
-		if len(items) >= limit {
-			break
-		}
-	}
-	return items, nil
-}
-
-func parseFeed(body []byte) ([]xmlItem, error) {
-	dec := xml.NewDecoder(bytes.NewReader(body))
-	dec.Strict = false
-	dec.Entity = xml.HTMLEntity
-	dec.CharsetReader = func(charset string, r io.Reader) (io.Reader, error) {
-		switch strings.ToLower(charset) {
-		case "utf-8", "utf8", "us-ascii", "ascii":
-			return r, nil
-		default: // iso-8859-1 / windows-1252: map bytes to runes
-			b, err := io.ReadAll(r)
-			if err != nil {
-				return nil, err
-			}
-			var sb strings.Builder
-			for _, c := range b {
-				sb.WriteRune(rune(c))
-			}
-			return strings.NewReader(sb.String()), nil
-		}
-	}
-	var items []xmlItem
-	for {
-		tok, err := dec.Token()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			if len(items) > 0 {
-				break // keep what parsed before the broken markup
-			}
-			return nil, fmt.Errorf("bad xml: %v", shortErr(err))
-		}
-		se, ok := tok.(xml.StartElement)
-		if !ok || (se.Name.Local != "item" && se.Name.Local != "entry") {
-			continue
-		}
-		var it xmlItem
-		if err := dec.DecodeElement(&it, &se); err != nil {
-			continue
-		}
-		items = append(items, it)
-	}
-	if len(items) == 0 {
-		return nil, errors.New("no items in feed")
-	}
-	return items, nil
-}
-
-func pickLink(r xmlItem) string {
-	var fallback string
-	for _, l := range r.Links {
-		if l.Href != "" && (l.Rel == "" || l.Rel == "alternate") {
-			return strings.TrimSpace(l.Href)
-		}
-		if t := strings.TrimSpace(l.Text); t != "" && fallback == "" {
-			fallback = t
-		}
-	}
-	if fallback != "" {
-		return fallback
-	}
-	if g := strings.TrimSpace(r.GUID); strings.HasPrefix(g, "http") {
-		return g
-	}
-	if id := strings.TrimSpace(r.ID); strings.HasPrefix(id, "http") {
-		return id
-	}
-	return ""
-}
-
-var dateLayouts = []string{
-	time.RFC1123Z, time.RFC1123, time.RFC3339, time.RFC3339Nano,
-	"Mon, 2 Jan 2006 15:04:05 -0700", "Mon, 2 Jan 2006 15:04:05 MST",
-	"Mon, 02 Jan 2006 15:04:05 Z", "Mon, 2 Jan 2006 15:04 -0700", "Mon, 2 Jan 2006 15:04 MST",
-	"2 Jan 2006 15:04:05 -0700", "02 Jan 2006 15:04:05 MST",
-	"Mon, 02 Jan 06 15:04:05 -0700", "Mon,  2 Jan 2006 15:04:05 -0700",
-	"2006-01-02T15:04:05Z0700", "2006-01-02T15:04:05", "2006-01-02 15:04:05 -0700",
-	"2006-01-02 15:04:05", "January 2, 2006 15:04 MST", "2006-01-02",
-}
-
-func parseDate(s string) time.Time {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}
-	}
-	for _, l := range dateLayouts {
-		if t, err := time.Parse(l, s); err == nil {
-			return t
-		}
-	}
-	// "EDT"/"EST"-style zones parse with zero offset; good enough for sorting.
-	return time.Time{}
+	return body, nil
 }
 
 var (
 	tagRE   = regexp.MustCompile(`(?s)<[^>]*>`)
+	brRE    = regexp.MustCompile(`(?i)<br\s*/?>`)
 	spaceRE = regexp.MustCompile(`\s+`)
 	punctRE = regexp.MustCompile(`[^\p{L}\p{N} ]+`)
 )
@@ -384,6 +318,42 @@ func cleanText(s string) string {
 	s = tagRE.ReplaceAllString(s, " ")
 	s = html.UnescapeString(s) // double-escaped feeds
 	return strings.TrimSpace(spaceRE.ReplaceAllString(s, " "))
+}
+
+// splitPost turns a social post into a headline (its first line or sentence)
+// and a summary (the rest).
+func splitPost(text string) (title, summary string) {
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(spaceRE.ReplaceAllString(l, " ")); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 {
+		return "", ""
+	}
+	title = lines[0]
+	rest := strings.Join(lines[1:], " ")
+	// A one-word or emoji-only first line ("BREAKING:", "🚨") isn't a headline.
+	if utf8.RuneCountInString(title) < 25 && rest != "" {
+		title, rest = title+" "+rest, ""
+	}
+	if utf8.RuneCountInString(title) > 220 {
+		r := []rune(title)
+		cut := 220
+		for i := 80; i < 220; i++ {
+			if (r[i] == '.' || r[i] == '!' || r[i] == '?') && i+1 < len(r) && r[i+1] == ' ' {
+				cut = i + 1
+				break
+			}
+		}
+		rest = strings.TrimSpace(string(r[cut:]) + " " + rest)
+		title = strings.TrimSpace(string(r[:cut]))
+		if cut == 220 {
+			title += "…"
+		}
+	}
+	return title, truncate(strings.TrimSpace(rest), 280)
 }
 
 func normTitle(s string) string {
