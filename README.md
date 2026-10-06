@@ -1,149 +1,37 @@
-<div align="center">
+# The World Now
+
+Live world headlines at **https://news.sala.company**. It runs entirely on GitHub, with no servers, API keys or third-party proxies.
 
 ```
-╔══════════════════════════════════════╗
-║        🌍  THE WORLD NOW  🌍         ║
-╚══════════════════════════════════════╝
+ every 15 min            GitHub Actions                       GitHub Pages
+┌──────────────┐  go run ./fetcher  ┌───────────┐  deploy-pages  ┌──────────────────┐
+│ cron trigger │ ─────────────────▶ │ feed.json │ ─────────────▶ │ index.html + JS  │
+└──────────────┘  ~45 public feeds  └───────────┘                │ reads feed.json  │
+                                                                 └──────────────────┘
 ```
 
-### *A live window into the world, right now.*
+- **`fetcher/`**: a small Go program (standard library only). It downloads every feed in `sources.json` on GitHub's servers, so the browser never runs into CORS, then drops items older than 48 hours, removes duplicates and writes `feed.json`.
+- **`index.html`, `app.js`, `style.css`**: a static page with no build step. It loads `feed.json` and polls for new builds.
+- **`.github/workflows/update.yml`**: runs every 15 minutes, on every push and on demand (**Actions → Update news & deploy → Run workflow**). Only `main` deploys.
 
-[![GitHub Pages](https://img.shields.io/badge/deployed-GitHub%20Pages-22272e?style=for-the-badge&logo=github)](https://jamalxcode.github.io/the-world-now)
-[![React](https://img.shields.io/badge/React-19.2.3-61DAFB?style=for-the-badge&logo=react)](https://react.dev)
-[![HTML](https://img.shields.io/badge/Language-HTML%20100%25-E34F26?style=for-the-badge&logo=html5)](https://github.com/jamalxcode/the-world-now)
-[![Status](https://img.shields.io/badge/status-live-brightgreen?style=for-the-badge)](https://jamalxcode.github.io/the-world-now)
+## Editing sources
 
-</div>
+Add or remove entries in [`sources.json`](sources.json) and push. Only use public RSS/Atom feeds that need no sign-up. Each entry has a `name`, a `url` and a `category` (`top`, `world`, `mideast`, `biz`, `tech`, `defense` or `science`). Some sites block GitHub's servers, so check the run log after adding one.
 
----
+## When feeds fail
 
-## ✨ What Is This?
+- On the site, **[SOURCES]** (or the `s` key) lists every feed with its status and the latest error.
+- If fewer than `min_ok_sources` feeds work, the fetcher **fails the run instead of publishing an empty page**. The last good version stays live, and GitHub emails you about the failed workflow.
+- The header dot turns amber or red when the data is more than 40 or 120 minutes old.
+- GitHub pauses scheduled workflows after 60 days without commits. The workflow makes a small heartbeat commit when the repo has been quiet for 45 days.
 
-**The World Now** is a sleek, fast, browser-based experience built with **React 19** and bundled via **Vite**. Deployed seamlessly on **GitHub Pages**, it's designed to be instantly accessible — no installs, no accounts, just open and explore.
-
----
-
-## 🗂️ Project Structure
-
-```
-the-world-now/
-├── 📄 index.html               ← App entry point
-├── 📄 config.json              ← Editable sources config (no rebuild needed)
-├── 📁 assets/
-│   ├── 🧠 index-pBGzX7_c.js   ← Bundled React app (Vite output)
-│   └── 🎨 index-eCIea8pR.css  ← Compiled styles
-└── 🌐 CNAME                    ← Custom domain config
-```
-
----
-
-## 📡 Sources & Configuration
-
-News sources are controlled via **`config.json`** — edit it directly without rebuilding.
-
-### Nitter / Twitter Accounts
-100+ accounts across global news, finance, geopolitics, and conflict monitoring — including NYT, BBC, Reuters, AP, Al Jazeera, CNN, FRANCE24, Fox, WSJ, FT, Bloomberg, The Economist, and OSINT/conflict trackers like `OSINTdefender`, `KyivIndependent`, `sentdefender`, and more.
-
-### Reddit Subreddits
-`worldnews` · `news` · `technology` · `science` · `business` · `geopolitics`
-
-### Nitter Instances (fallback chain)
-- `https://rss.xcancel.com`
-- `https://xcancel.com`
-- `https://nitter.privacydev.net`
-
-### Config Options
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `nitter_sample_size` | `8` | Accounts sampled per refresh |
-| `fetch_timeout_ms` | `15000` | Per-source fetch timeout |
-| `target_item_count` | `80` | Total feed items to display |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- A modern browser (Chrome, Firefox, Safari, Edge)
-- Node.js `18+` if you want to run it locally
-
-### Run Locally
+## Run locally
 
 ```bash
-# Clone the repo
-git clone https://github.com/jamalxcode/the-world-now.git
-cd the-world-now
-
-# Install dependencies (if working from source)
-npm install
-
-# Start dev server
-npm run dev
+go run ./fetcher -out feed.json   # needs Go 1.22+
+python -m http.server 8000         # or any static server, then open http://localhost:8000
 ```
 
-### Build for Production
+## Keyboard
 
-```bash
-npm run build
-```
-
-> Vite will output the production-ready bundle into the `assets/` folder.
-
----
-
-## 🌐 Live Demo
-
-👉 **[jamalxcode.github.io/the-world-now](https://jamalxcode.github.io/the-world-now)**
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| ⚛️ UI Framework | React 19.2.3 |
-| ⚡ Build Tool | Vite |
-| 🎨 Styling | CSS (compiled) |
-| 📡 Feed Sources | Nitter RSS + Reddit JSON |
-| 🚀 Deployment | GitHub Pages |
-| 🌐 Language | HTML / JavaScript |
-
----
-
-## 📦 Deployment
-
-This project is configured for **GitHub Pages** auto-deployment.
-
-- A `CNAME` file is present for custom domain support
-- Assets are pre-bundled — no server needed
-- Deployments trigger automatically on push to `main`
-- Sources can be updated via `config.json` without a rebuild
-
----
-
-## 🤝 Contributing
-
-Got an idea that'd make the world feel a little more *now*?
-
-1. Fork the repo 🍴
-2. Create your branch: `git checkout -b feature/your-idea`
-3. Commit your changes: `git commit -m 'Add some magic'`
-4. Push to the branch: `git push origin feature/your-idea`
-5. Open a Pull Request 🚀
-
----
-
-## 👤 Author
-
-**jamalxcode**
-- GitHub: [@jamalxcode](https://github.com/jamalxcode)
-
----
-
-<div align="center">
-
-*Built with ❤️ and deployed to the world.*
-
-</div>
+`j`/`k` navigate · `o` open · `space` expand related · `/` search · `r` refresh · `n` apply new · `c` cluster · `v` video links · `h` heatmaps · `s` sources · `?` help
