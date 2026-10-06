@@ -178,6 +178,20 @@ select.chip { padding-right: 4px; }
 .related a { text-decoration: none; }
 .related a:hover { color: var(--blue); }
 
+.media { margin-right: 6px; font-size: .95em; font-style: normal; }
+
+/* ---------- compact view: one story per line ---------- */
+.feed.compact .row.c { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 5px 14px; }
+.row.c .c-time { flex: none; width: 40px; font-size: 12px; color: var(--muted); }
+.row.c .c-src { flex: none; width: 140px; min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; }
+.row.c .c-src .src { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+.row.c .c-src .src::before { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.row.c .title { flex: 1 1 0; min-width: 0; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+.row.c .title .brk-tag { font-size: 9px; padding: 0 5px; vertical-align: 1px; }
+.row.c .more { flex: none; min-width: 30px; padding: 0 7px; font-size: 11.5px; }
+.row.c .c-open { flex-basis: 100%; padding: 2px 0 6px 50px; }
+.row.c .c-open .summary { margin-top: 2px; }
+
 .foot { margin-top: 18px; font-size: 12px; color: var(--muted); text-align: center; line-height: 1.6; }
 
 /* ---------- phones ---------- */
@@ -197,5 +211,10 @@ select.chip { padding-right: 4px; }
   .brk-row { flex-wrap: wrap; }
   .brk-meta { flex-basis: 100%; }
   .src-list { grid-template-columns: 1fr; }
+  .feed.compact .row.c { gap: 0 8px; padding: 6px 12px; }
+  .row.c .c-time { width: 36px; font-size: 11.5px; }
+  .row.c .c-src { width: 84px; font-size: 11.5px; }
+  .row.c .c-src .plat, .row.c .title .brk-tag { display: none; } /* the red edge still marks breaking */
+  .row.c .c-open { padding-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .logo span, .brk-head .live, .row.fresh { animation: none; } }

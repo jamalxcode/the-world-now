@@ -23,7 +23,7 @@ Live world headlines at **https://news.sala.company**. It runs entirely on GitHu
 
 ## Look and controls
 
-The design follows heat.sala.company: Inter, soft cards and an automatic light or dark theme (switch with the ◐ button). **↺ Reset** (key `x`) clears the search and filters, closes panels and goes back to the default view. It keeps your theme, alerts and sound settings.
+The design follows heat.sala.company: Inter, soft cards and an automatic light or dark theme (switch with the ◐ button). **Comfortable / Compact** (key `d`) switches between larger headlines with details and one headline per line. Headlines with video show 📺 and ones with audio (podcasts, voice notes) show 🔊, detected from the source's media tags, Telegram and Bluesky video posts, and video or podcast links. **↺ Reset** (key `x`) clears the search and filters, closes panels and goes back to the default view. It keeps your theme, alerts and sound settings.
 
 ## Breaking news
 
@@ -61,4 +61,4 @@ python -m http.server 8000         # or any static server, then open http://loca
 
 ## Keyboard
 
-`x` ↺ reset view · `j`/`k` navigate · `o` open · `space` more reports · `/` search · `r` refresh · `n` apply new · `b` jump to breaking · `a` alerts · `c` cluster · `v` video links · `h` heatmaps · `s` sources · `?` help
+`x` ↺ reset view · `j`/`k` navigate · `o` open · `space` more reports · `/` search · `r` refresh · `n` apply new · `b` jump to breaking · `a` alerts · `d` compact · `c` cluster · `v` video links · `h` heatmaps · `s` sources · `?` help

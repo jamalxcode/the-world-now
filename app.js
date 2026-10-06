@@ -17,7 +17,7 @@ const LIVE_POLL_S = 60;
 const PAGE_START = Date.now();
 
 // What ↺ Reset returns to. Theme, alerts and sound are personal settings and stay as they are.
-const DEFAULTS = { cat: "all", cluster: true, video: false, auto: true, interval: 120 };
+const DEFAULTS = { cat: "all", cluster: true, density: "comfortable", video: false, auto: true, interval: 120 };
 const THEMES = ["", "light", "dark"], THEME_LABEL = { "": "◐ Auto", light: "☀ Light", dark: "☾ Dark" };
 
 const $ = (id) => document.getElementById(id);
@@ -42,6 +42,7 @@ const state = {
   sound: store.get("sound", false),
   alerts: store.get("alerts", false),
   cluster: store.get("cluster", DEFAULTS.cluster),
+  density: store.get("density", DEFAULTS.density),
   video: store.get("video", DEFAULTS.video),
   cat: store.get("cat", DEFAULTS.cat),
   theme: store.get("theme", ""),
@@ -124,7 +125,28 @@ function bskyItem(it, src) {
     if (ext.title && (title.length < 30 || title.includes("http"))) title = ext.title.trim();
   }
   if (title.split(/\s+/).filter(Boolean).length < 4) return null; // same rule as the fetcher
-  return { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
+  const isVideo = (t) => typeof t === "string" && t.startsWith("app.bsky.embed.video");
+  const hint = p.embed && (isVideo(p.embed.$type) || (p.embed.media && isVideo(p.embed.media.$type))) ? "video" : "";
+  const item = { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
+  const media = detectMedia(hint, url, title);
+  if (media) item.media = media;
+  return item;
+}
+
+// Mirrors detectMedia in fetcher/main.go.
+const VIDEO_URL = /(\/videos?\/|\/av\/|\/watch\/|\/clip\/|\/live-video|youtube\.com\/(watch|shorts|live)|youtu\.be\/|vimeo\.com\/|rumble\.com\/|\.(mp4|m3u8|webm)(\?|$))/i;
+const AUDIO_URL = /(\/podcasts?\/|\/audio\/|\/sounds\/|\/listen\/|\/radio\/|open\.spotify\.com\/(episode|show)|podcasts\.apple\.com\/|soundcloud\.com\/|\.(mp3|m4a|ogg)(\?|$))/i;
+function detectMedia(hint, url, title) {
+  if (hint) return hint;
+  if (VIDEO_URL.test(url) || /^(watch|video|live video)\s*[:|–—-]/i.test(title)) return "video";
+  if (AUDIO_URL.test(url) || /^(listen|podcast|audio)\s*[:|–—-]/i.test(title)) return "audio";
+  return "";
+}
+
+function mediaIcon(item) {
+  if (item.media === "video") return '<span class="media" role="img" aria-label="Has video" title="Has video">📺</span>';
+  if (item.media === "audio") return '<span class="media" role="img" aria-label="Has audio" title="Has audio">🔊</span>';
+  return "";
 }
 
 // Mirrors splitPost/tidyPostTitle in fetcher/main.go.
@@ -296,10 +318,11 @@ function rowHTML({ item, related }, idx) {
   const breaking = state.breakingIds.has(item.id) || related.some((r) => state.breakingIds.has(r.id));
   if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
+  if (state.density === "compact") return compactRowHTML(item, related, idx, cls, breaking, open);
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
   h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
     '<span title="' + esc(new Date(item.published).toUTCString()) + '">' + timeAgo(item.published) + " ago · " + hhmm(item.published) + " UTC</span></div>";
-  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + esc(item.title) + "</a>";
+  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
   let actions = "";
   if (related.length || item.summary) {
     const label = related.length ? (open ? "Hide " : "") + related.length + " more report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
@@ -311,8 +334,33 @@ function rowHTML({ item, related }, idx) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
     }
+  }
+  return h + "</article>";
+}
+
+// Compact: one line per story (time · source · headline · "+N"); details open underneath.
+function compactRowHTML(item, related, idx, cls, breaking, open) {
+  let h = '<article class="' + cls.join(" ") + ' c" id="row-' + idx + '">';
+  h += '<span class="c-time" title="' + esc(new Date(item.published).toUTCString()) + " (" + timeAgo(item.published) + ' ago)">' + hhmm(item.published) + "</span>";
+  h += '<span class="c-src">' + srcHTML(item, "button") + "</span>";
+  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
+    (breaking ? '<span class="brk-tag">Breaking</span> ' : "") + mediaIcon(item) + esc(item.title) + "</a>";
+  if (related.length || item.summary || state.video) {
+    const label = related.length ? "+" + related.length : open ? "−" : "…";
+    const tip = related.length ? related.length + " more report" + (related.length > 1 ? "s" : "") : "Details";
+    h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '" title="' + tip + '">' + label + "</button>";
+  }
+  if (open) {
+    h += '<div class="c-open">';
+    if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
+    if (state.video) h += '<div class="actions">' + videoLinks(item.title) + "</div>";
+    if (related.length) {
+      h += '<div class="related">' + related.map((r) =>
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
+    }
+    h += "</div>";
   }
   return h + "</article>";
 }
@@ -367,6 +415,8 @@ function renderButtons() {
   press("btn-heat", state.panel === "heat");
   press("btn-sources", state.panel === "sources");
   press("btn-help", state.panel === "help");
+  document.querySelectorAll("#density button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === state.density));
+  $("feed").classList.toggle("compact", state.density === "compact");
   document.querySelectorAll("#view button").forEach((b) => b.setAttribute("aria-pressed", (b.dataset.v === "grouped") === state.cluster));
   $("interval").value = String(state.interval);
   $("interval").disabled = !state.auto;
@@ -389,7 +439,7 @@ function renderPanel() {
 }
 
 function helpHTML() {
-  const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["v", "Video links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
+  const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["d", "Comfortable / compact"], ["v", "Video links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
   return '<div class="panel-grid"><div><h2>Keyboard shortcuts</h2>' + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") + "</div>" +
     "<div><h2>How it works</h2><p>Headlines come from about 95 public sources: news sites' RSS feeds, public Telegram channels and public Bluesky accounts. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
     "<p><b>Grouped</b> puts reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
@@ -573,6 +623,14 @@ function setCluster(on) {
   render();
 }
 
+function setDensity(d) {
+  state.density = d;
+  store.set("density", d);
+  renderButtons();
+  render();
+  if (state.sel >= 0) select(state.sel);
+}
+
 async function toggleAlerts() {
   if (!state.alerts && "Notification" in window && Notification.permission === "default") {
     try { await Notification.requestPermission(); } catch { /* ignore */ }
@@ -606,6 +664,7 @@ $("btn-heat").onclick = () => togglePanel("heat");
 $("btn-sources").onclick = () => togglePanel("sources");
 $("btn-help").onclick = () => togglePanel("help");
 $("view").onclick = (e) => { const b = e.target.closest("button"); if (b) setCluster(b.dataset.v === "grouped"); };
+$("density").onclick = (e) => { const b = e.target.closest("button"); if (b) setDensity(b.dataset.v); };
 $("staged").onclick = () => { applyPending(); window.scrollTo({ top: 0 }); };
 $("search").oninput = (e) => { state.query = e.target.value; state.sel = -1; render(); };
 
@@ -648,6 +707,7 @@ document.addEventListener("keydown", (e) => {
     case "b": if (state.breaking.length) jumpTo(state.breaking[0].lead.id); break;
     case "a": toggleAlerts(); break;
     case "c": setCluster(!state.cluster); break;
+    case "d": setDensity(state.density === "compact" ? "comfortable" : "compact"); break;
     case "v": $("btn-video").click(); break;
     case "h": togglePanel("heat"); break;
     case "s": togglePanel("sources"); break;
