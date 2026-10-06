@@ -36,8 +36,14 @@ jobs:
           mkdir -p _site
           go run ./fetcher -sources sources.json -out _site/feed.json
 
+      # Browsers may reuse app.js and style.css for 10 minutes, so right after a release a page could mix
+      # new HTML with old scripts. Tag both addresses with the commit so each release loads its own files.
       - name: Assemble site
-        run: cp -r index.html app.js style.css fonts CNAME _site/
+        run: |
+          cp -r index.html app.js style.css fonts CNAME _site/
+          v="${GITHUB_SHA::7}"
+          sed -i "s|src=\"app.js\"|src=\"app.js?v=$v\"|; s|href=\"style.css\"|href=\"style.css?v=$v\"|" _site/index.html
+          grep -q "app.js?v=$v" _site/index.html && grep -q "style.css?v=$v" _site/index.html
 
       - uses: actions/upload-pages-artifact@v4
         with:
