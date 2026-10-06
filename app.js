@@ -367,14 +367,14 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
 
 // Search links use a few keywords, not the whole headline: a full headline is so literal
 // that it often finds nothing. Each link asks for the newest results where the site allows it.
-// The number is how many keywords each site gets: Rumble has far fewer uploads, so on a fresh story
-// 3 words mostly match old videos, while the 2 strongest ("Nobel Prize") find this week's.
+// The number is how many keywords each site gets: Bilibili is much smaller, so on a fresh story
+// 3 words mostly match nothing or old videos, while the 2 strongest ("Nobel Prize") find something.
 const SEARCH_LINKS = [
   ["X", 4, (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
   ["YouTube", 4, (q) => "https://www.youtube.com/results?search_query=" + q + "&sp=EgIIAw%253D%253D"], // uploaded this week; YouTube no longer sorts by date
   ["Google News", 4, (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
-  ["Rumble", 2, (q) => "https://rumble.com/search/video?q=" + q + "&sort=date"], // newest first
-  ["Yandex", 4, (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
+  ["Yandex Video", 4, (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
+  ["Bilibili", 2, (q) => "https://www.bilibili.tv/en/search-result?q=" + q], // relevance only: no newest-first option in its links
 ];
 // Filler words and weak verbs that make a search too literal.
 const SEARCH_STOP = new Set(("the and for are was were has had have his her its our not but all any can out who how why what when where new one two " +
