@@ -318,17 +318,17 @@ function rowHTML({ item, related }, idx) {
   if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
   if (state.density === "compact") return compactRowHTML(item, related, idx, cls, breaking, open);
+  // Two lines: the headline, then source · time (reader's local time) · more reports · search links.
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
-  h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
-    '<span title="' + esc(new Date(item.published).toUTCString()) + '">' + timeAgo(item.published) + " ago · " + hhmm(item.published) + " UTC</span></div>";
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
-  let actions = "";
+  h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
+    '<span class="when" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>";
   if (related.length || item.summary) {
-    const label = related.length ? (open ? "Hide " : "") + related.length + " more report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
-    actions += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
+    const label = related.length ? (open ? "Hide " : "+") + related.length + " report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
+    h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
   }
-  if (state.links) actions += videoLinks(item.title);
-  if (actions) h += '<div class="actions">' + actions + "</div>";
+  if (state.links) h += videoLinks(item.title);
+  h += "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
@@ -342,7 +342,7 @@ function rowHTML({ item, related }, idx) {
 // Compact: one line per story (time · source · headline · "+N"); details open underneath.
 function compactRowHTML(item, related, idx, cls, breaking, open) {
   let h = '<article class="' + cls.join(" ") + ' c" id="row-' + idx + '">';
-  h += '<span class="c-time" title="' + esc(new Date(item.published).toUTCString()) + " (" + timeAgo(item.published) + ' ago)">' + hhmm(item.published) + "</span>";
+  h += '<span class="c-time" title="' + esc(fullTime(item.published)) + " (" + timeAgo(item.published) + ' ago)">' + hhmm(item.published) + "</span>";
   h += '<span class="c-src">' + srcHTML(item, "button") + "</span>";
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
     (breaking ? '<span class="brk-tag">Breaking</span> ' : "") + mediaIcon(item) + esc(item.title) + "</a>";
@@ -570,10 +570,12 @@ function timeAgo(iso) {
   return h < 48 ? h + "h" + (h < 6 && m % 60 ? " " + (m % 60) + "m" : "") : Math.floor(h / 24) + "d";
 }
 
-function hhmm(iso) {
-  const d = new Date(iso);
-  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
-}
+// Times are shown in the reader's own time zone and clock style (24h or am/pm), from the browser's settings.
+const TIME_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" });
+const FULL_FMT = new Intl.DateTimeFormat([], { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+const CLOCK_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+function hhmm(iso) { return TIME_FMT.format(new Date(iso)); }
+function fullTime(iso) { return FULL_FMT.format(new Date(iso)); }
 
 const hueCache = new Map();
 function srcHue(name) {
@@ -768,7 +770,7 @@ document.addEventListener("visibilitychange", () => {
   if (state.auto) { load(false); pollLive(false); }
 });
 
-function tick() { $("clock").textContent = hhmm(new Date().toISOString()) + " UTC"; }
+function tick() { $("clock").textContent = CLOCK_FMT.format(new Date()); }
 setInterval(tick, 15000);
 setInterval(() => {
   updateFreshness();

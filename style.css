@@ -147,7 +147,8 @@ select.chip { padding-right: 4px; }
 .row.brk { box-shadow: inset 3px 0 0 var(--red); }
 .row.fresh { animation: flash 2.5s ease-out; }
 @keyframes flash { from { background: var(--fresh); } }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--muted); margin-top: 5px; }
+.meta .when { white-space: nowrap; }
 .src { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: hsl(var(--h) 55% var(--src-l)); cursor: pointer; border: 0; background: none; padding: 0; font-size: 12px; }
 .src::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .src:hover { text-decoration: underline; }
@@ -156,13 +157,13 @@ select.chip { padding-right: 4px; }
 .title:hover { color: var(--blue); }
 .row.read .title { color: var(--ink-2); font-weight: 500; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.more { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 1px 9px; font-size: 12px; color: var(--ink-2); cursor: pointer; }
+.more { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 0 8px; font-size: 11.5px; color: var(--ink-2); cursor: pointer; }
 .more:hover { background: var(--neutral); color: var(--ink); }
 .more[aria-expanded="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .vids { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.vids a { font-size: 12px; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+.vids a { font-size: 11.5px; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
 .vids a:hover { color: var(--blue); }
-.vids .vlab { font-size: 12px; color: var(--muted); align-self: center; margin-right: 2px; }
+.vids .vlab { font-size: 11.5px; color: var(--muted); align-self: center; margin-right: 2px; }
 .summary { color: var(--ink-2); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
 .related { margin-top: 8px; border-left: 2px solid var(--grid); padding-left: 12px; display: grid; gap: 6px; }
 .related .r { font-size: 13.5px; line-height: 1.4; }
@@ -175,7 +176,7 @@ select.chip { padding-right: 4px; }
 
 /* ---------- compact view: one story per line ---------- */
 .feed.compact .row.c { display: flex; flex-wrap: wrap; align-items: center; gap: 0 10px; padding: 5px 14px; }
-.row.c .c-time { flex: none; width: 40px; font-size: 12px; color: var(--muted); }
+.row.c .c-time { flex: none; min-width: 40px; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .row.c .c-src { flex: none; width: 140px; min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; }
 .row.c .c-src .src { overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
 .row.c .c-src .src::before { display: inline-block; margin-right: 6px; vertical-align: 1px; }
@@ -205,7 +206,7 @@ select.chip { padding-right: 4px; }
 
   .src-list { grid-template-columns: 1fr; }
   .feed.compact .row.c { gap: 0 8px; padding: 6px 12px; }
-  .row.c .c-time { width: 36px; font-size: 11.5px; }
+  .row.c .c-time { min-width: 36px; font-size: 11.5px; }
   .row.c .c-src { width: 84px; font-size: 11.5px; }
   .row.c .c-src .plat, .row.c .title .brk-tag { display: none; } /* the red edge still marks breaking */
   .row.c .c-open { padding-left: 0; }
