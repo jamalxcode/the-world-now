@@ -90,7 +90,7 @@ input:focus, select:focus, .btn:focus-visible { outline: 1px solid var(--accent)
 .related .rs { font-size: 11px; margin-right: 8px; }
 
 @media (max-width: 700px) {
-  header { padding: 8px 16px; }
+  header { position: static; padding: 8px 16px; }
   .count { margin-left: 0; }
   input { width: 100%; }
   .row { flex-wrap: wrap; gap: 2px 10px; padding: 6px 16px; }
