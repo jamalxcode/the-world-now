@@ -17,7 +17,7 @@ const LIVE_POLL_S = 60;
 const PAGE_START = Date.now();
 
 // What ↺ Reset returns to. Theme, alerts and sound are personal settings and stay as they are.
-const DEFAULTS = { cat: "all", cluster: true, density: "comfortable", video: false, auto: true, interval: 120 };
+const DEFAULTS = { cat: "all", cluster: true, density: "comfortable", links: true, auto: true, interval: 120 };
 const THEMES = ["", "light", "dark"], THEME_LABEL = { "": "◐ Auto", light: "☀ Light", dark: "☾ Dark" };
 
 const $ = (id) => document.getElementById(id);
@@ -43,7 +43,7 @@ const state = {
   alerts: store.get("alerts", false),
   cluster: store.get("cluster", DEFAULTS.cluster),
   density: store.get("density", DEFAULTS.density),
-  video: store.get("video", DEFAULTS.video),
+  links: store.get("links", DEFAULTS.links), // search links under each headline (new key, so the old "off" default is gone)
   cat: store.get("cat", DEFAULTS.cat),
   theme: store.get("theme", ""),
   source: null,
@@ -327,7 +327,7 @@ function rowHTML({ item, related }, idx) {
     const label = related.length ? (open ? "Hide " : "") + related.length + " more report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
     actions += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
   }
-  if (state.video) actions += videoLinks(item.title);
+  if (state.links) actions += videoLinks(item.title);
   if (actions) h += '<div class="actions">' + actions + "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
@@ -346,7 +346,7 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   h += '<span class="c-src">' + srcHTML(item, "button") + "</span>";
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
     (breaking ? '<span class="brk-tag">Breaking</span> ' : "") + mediaIcon(item) + esc(item.title) + "</a>";
-  if (related.length || item.summary || state.video) {
+  if (related.length || item.summary || state.links) {
     const label = related.length ? "+" + related.length : open ? "−" : "…";
     const tip = related.length ? related.length + " more report" + (related.length > 1 ? "s" : "") : "Details";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '" title="' + tip + '">' + label + "</button>";
@@ -354,7 +354,7 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   if (open) {
     h += '<div class="c-open">';
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
-    if (state.video) h += '<div class="actions">' + videoLinks(item.title) + "</div>";
+    if (state.links) h += '<div class="actions">' + videoLinks(item.title) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
         '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
@@ -410,7 +410,7 @@ function searchQuery(title) {
 
 function videoLinks(title) {
   const q = searchQuery(title);
-  return '<span class="vids">' + SEARCH_LINKS.map(([name, url]) => '<a href="' + esc(url(q)) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
+  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, url]) => '<a href="' + esc(url(q)) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
 }
 
 function renderStaged(n) {
@@ -441,7 +441,7 @@ function renderButtons() {
   press("btn-auto", state.auto);
   press("btn-snd", state.sound);
   press("btn-alerts", state.alerts);
-  press("btn-video", state.video);
+  press("btn-video", state.links);
   press("btn-heat", state.panel === "heat");
   press("btn-sources", state.panel === "sources");
   press("btn-help", state.panel === "help");
@@ -689,7 +689,7 @@ $("btn-auto").onclick = () => { state.auto = !state.auto; store.set("auto", stat
 $("interval").onchange = (e) => { state.interval = +e.target.value; store.set("interval", state.interval); schedule(); };
 $("btn-snd").onclick = () => { state.sound = !state.sound; store.set("sound", state.sound); renderButtons(); if (state.sound) beep(); };
 $("btn-alerts").onclick = toggleAlerts;
-$("btn-video").onclick = () => { state.video = !state.video; store.set("video", state.video); renderButtons(); render(); };
+$("btn-video").onclick = () => { state.links = !state.links; store.set("links", state.links); renderButtons(); render(); };
 $("btn-heat").onclick = () => togglePanel("heat");
 $("btn-sources").onclick = () => togglePanel("sources");
 $("btn-help").onclick = () => togglePanel("help");
