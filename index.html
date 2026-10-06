@@ -4,10 +4,49 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>The World Now</title>
-    <script type="module" crossorigin src="./assets/index-BAQO1TIW.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-eCIea8pR.css">
+    <meta name="description" content="Live world headlines from public news feeds, refreshed every 15 minutes." />
+    <meta name="theme-color" content="#111111" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111'/><circle cx='8' cy='8' r='4' fill='%23FF5733'/></svg>" />
+    <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <header id="top">
+      <div class="line1">
+        <span class="brand">news.sala.company</span>
+        <span class="sep">//</span>
+        <span id="clock" class="clock">----</span>
+        <span id="dot" class="dot" title="data freshness"></span>
+        <span id="fresh" class="dim">loading…</span>
+      </div>
+      <div class="controls">
+        <button id="btn-auto" class="btn on">[AUTO ON]</button>
+        <select id="interval" aria-label="Auto refresh interval">
+          <option value="60">1m</option>
+          <option value="300">5m</option>
+          <option value="900">15m</option>
+        </select>
+        <button id="btn-fetch" class="btn accent">[FETCH]</button>
+        <button id="btn-snd" class="btn">[SND OFF]</button>
+        <button id="btn-cluster" class="btn">[CLUSTER]</button>
+        <button id="btn-video" class="btn">[VIDEO]</button>
+        <button id="btn-heat" class="btn">[HEATMAPS]</button>
+        <button id="btn-sources" class="btn">[SOURCES]</button>
+        <button id="btn-help" class="btn">[HELP]</button>
+        <span id="count" class="dim count">0 items</span>
+      </div>
+      <div class="controls">
+        <label class="dim" for="search">Search:</label>
+        <input id="search" type="search" placeholder="type / to focus" autocomplete="off" spellcheck="false" />
+        <span id="cats" class="cats"></span>
+        <span id="srcfilter" class="dim"></span>
+      </div>
+      <div id="staged" class="staged" hidden></div>
+      <div id="error" class="error" hidden></div>
+    </header>
+
+    <section id="panel" class="panel" hidden></section>
+    <main id="feed" class="feed"><div class="empty dim">Loading headlines…</div></main>
+
+    <script src="app.js"></script>
   </body>
 </html>
