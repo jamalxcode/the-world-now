@@ -2,7 +2,7 @@ name: Update news & deploy
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *" # GitHub's minimum; runs can start a few minutes late
   push:
   workflow_dispatch:
 
@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: false
@@ -35,7 +35,7 @@ jobs:
       - name: Assemble site
         run: cp -r index.html app.js style.css fonts CNAME _site/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
@@ -57,7 +57,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Commit heartbeat if repo has been quiet
         run: |
           last=$(git log -1 --format=%ct)

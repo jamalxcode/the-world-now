@@ -1,11 +1,20 @@
-// The World Now — reads feed.json (built every 15 min by a GitHub Action) and renders it.
+// The World Now — reads feed.json (rebuilt every ~5 min by a GitHub Action),
+// polls the listed Bluesky accounts live in between, and flags breaking stories.
 "use strict";
 
 const CATS = [
-  ["all", "ALL"], ["top", "TOP"], ["world", "WORLD"], ["mideast", "MIDEAST"],
-  ["biz", "BIZ"], ["tech", "TECH"], ["defense", "DEFENSE"], ["science", "SCI"],
+  ["all", "ALL"], ["top", "TOP"], ["world", "WORLD"], ["mideast", "MIDEAST"], ["osint", "OSINT"],
+  ["defense", "DEFENSE"], ["biz", "BIZ"], ["tech", "TECH"], ["hazard", "HAZARD"], ["science", "SCI"],
 ];
-const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last into over back after says said news live update updates latest video watch report reports january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
+const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last back news live update updates latest video watch report reports breaking urgent according officials official people told january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
+
+// A story is "breaking" when at least BREAK_MIN_SOURCES different outlets
+// report it and the newest report is under BREAK_FRESH_MIN minutes old.
+const BREAK_MIN_SOURCES = 3;
+const BREAK_WINDOW_H = 3;
+const BREAK_FRESH_MIN = 90;
+const LIVE_POLL_S = 60;
+const PAGE_START = Date.now();
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -15,13 +24,19 @@ const store = {
 
 const state = {
   data: null,
-  items: [],
-  staged: [],
+  live: new Map(), // id -> item, from direct Bluesky polling
+  liveAt: null,
+  items: [], // what is on screen
+  pending: null, // newer combined list waiting to be applied
   freshIds: new Set(),
+  breaking: [],
+  breakingIds: new Set(),
+  alerted: new Set(store.get("alerted", [])),
   read: new Set(store.get("read", [])),
   auto: store.get("auto", true),
-  interval: store.get("interval", 300),
+  interval: store.get("interval", 120),
   sound: store.get("sound", false),
+  alerts: store.get("alerts", false),
   cluster: store.get("cluster", true),
   video: store.get("video", false),
   cat: store.get("cat", "all"),
@@ -31,7 +46,7 @@ const state = {
   sel: -1,
   expanded: new Set(),
   view: [],
-  timer: null,
+  timers: [],
   loading: false,
 };
 
@@ -46,7 +61,11 @@ async function load(manual) {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     showError(null);
-    ingest(data, manual);
+    const changed = !state.data || state.data.generated_at !== data.generated_at;
+    state.data = data;
+    updateFreshness();
+    if (changed) update(manual);
+    if (manual) pollLive(true);
   } catch (e) {
     showError("Could not load feed.json (" + e.message + "). " + (state.items.length ? "Showing last loaded headlines." : "Press [FETCH] to retry."));
     if (!state.items.length) $("feed").innerHTML = '<div class="empty dim">No stories available. Press [FETCH] to retry.</div>';
@@ -56,42 +75,107 @@ async function load(manual) {
   }
 }
 
-function ingest(data, manual) {
-  const first = !state.data;
-  const sameBuild = state.data && state.data.generated_at === data.generated_at;
-  state.data = data;
+// Bluesky's public API allows browser requests, so between feed builds we
+// fetch the newest posts from the accounts the build lists in data.live.
+let livePolling = false;
+async function pollLive(force) {
+  if (!state.data || !state.data.live || livePolling || (!force && document.hidden)) return;
+  livePolling = true;
+  const cutoff = Date.now() - 48 * 3600e3;
+  let added = 0;
+  try {
+    await Promise.all(state.data.live.map(async (src) => {
+      try {
+        const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=10&actor=" + encodeURIComponent(src.handle);
+        const res = await fetch(u);
+        if (!res.ok) return;
+        const { feed } = await res.json();
+        for (const it of feed || []) {
+          const item = bskyItem(it, src);
+          if (!item || state.live.has(item.id) || Date.parse(item.published) < cutoff) continue;
+          state.live.set(item.id, item);
+          added++;
+        }
+      } catch { /* one account failing shouldn't stop the rest */ }
+    }));
+  } finally {
+    livePolling = false;
+  }
+  for (const [id, it] of state.live) if (Date.parse(it.published) < cutoff) state.live.delete(id);
+  state.liveAt = new Date();
   updateFreshness();
-  if (sameBuild) return;
-  if (first) { state.items = data.items; render(); return; }
-
-  const known = new Set(state.items.map((i) => i.id).concat(state.staged.map((i) => i.id)));
-  const incoming = data.items.filter((i) => !known.has(i.id));
-  if (!incoming.length) return;
-  state.staged = incoming.concat(state.staged);
-  if (state.sound) beep();
-  const atTop = window.scrollY < 60 && state.sel < 0;
-  if (atTop || manual) applyStaged(); else renderStaged();
+  if (added) update(false);
 }
 
-function applyStaged() {
-  if (!state.staged.length) return;
-  state.freshIds = new Set(state.staged.map((i) => i.id));
-  // Use the latest build as the base so items that aged out disappear too.
-  const latest = state.data.items;
-  const ids = new Set(latest.map((i) => i.id));
-  state.items = latest.concat(state.items.filter((i) => !ids.has(i.id) && state.freshIds.has(i.id)));
-  state.staged = [];
-  renderStaged();
+function bskyItem(it, src) {
+  if (it.reason) return null; // repost
+  const p = it.post;
+  const rkey = p.uri.split("/").pop();
+  let [title, summary] = splitPost((p.record && p.record.text) || "");
+  let url = "https://bsky.app/profile/" + src.handle + "/post/" + rkey;
+  const ext = p.embed && p.embed.external;
+  if (ext && /^https?:/.test(ext.uri)) {
+    url = ext.uri;
+    if (ext.title && (title.length < 30 || title.includes("http"))) title = ext.title.trim();
+  }
+  if (!title) return null;
+  return { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
+}
+
+function splitPost(text) {
+  const lines = text.split("\n").map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (!lines.length) return ["", ""];
+  let title = lines[0], rest = lines.slice(1).join(" ");
+  if (title.length < 25 && rest) { title += " " + rest; rest = ""; }
+  if (title.length > 220) {
+    let cut = 220;
+    for (let i = 80; i < 220; i++) if (".!?".includes(title[i]) && title[i + 1] === " ") { cut = i + 1; break; }
+    rest = (title.slice(cut) + " " + rest).trim();
+    title = title.slice(0, cut).trim() + (cut === 220 ? "…" : "");
+  }
+  return [title, rest.slice(0, 280)];
+}
+
+function combined() {
+  const base = state.data ? state.data.items : [];
+  const ids = new Set(base.map((i) => i.id));
+  const urls = new Set(base.map((i) => i.url));
+  const extra = [...state.live.values()].filter((i) => !ids.has(i.id) && !urls.has(i.url));
+  return extra.length ? base.concat(extra).sort((a, b) => Date.parse(b.published) - Date.parse(a.published)) : base;
+}
+
+function update(manual) {
+  const next = combined();
+  computeBreaking(next);
+  if (!state.items.length) { state.items = next; render(); return; }
+  const shown = new Set(state.items.map((i) => i.id));
+  const newCount = next.filter((i) => !shown.has(i.id)).length;
+  state.pending = next;
+  if (!newCount) { applyPending(); return; } // only removals/reorders
+  if (state.sound) beep(660);
+  if (manual || (window.scrollY < 60 && state.sel < 0)) applyPending(); else renderStaged(newCount);
+}
+
+function applyPending() {
+  if (!state.pending) return;
+  const shown = new Set(state.items.map((i) => i.id));
+  state.freshIds = new Set(state.pending.filter((i) => !shown.has(i.id)).map((i) => i.id));
+  state.items = state.pending;
+  state.pending = null;
+  renderStaged(0);
   render();
   setTimeout(() => state.freshIds.clear(), 3000);
 }
 
 function schedule() {
-  clearInterval(state.timer);
-  if (state.auto) state.timer = setInterval(() => load(false), state.interval * 1000);
+  state.timers.forEach(clearInterval);
+  state.timers = [];
+  if (!state.auto) return;
+  state.timers.push(setInterval(() => load(false), state.interval * 1000));
+  state.timers.push(setInterval(() => pollLive(false), LIVE_POLL_S * 1000));
 }
 
-// ---------- clustering ----------
+// ---------- clustering & breaking ----------
 
 function tokens(title) {
   return new Set(title.toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)));
@@ -120,6 +204,47 @@ function clusterItems(items) {
   return out;
 }
 
+function computeBreaking(items) {
+  const now = Date.now();
+  const recent = items.filter((i) => now - Date.parse(i.published) < BREAK_WINDOW_H * 3600e3);
+  const found = [];
+  for (const c of clusterItems(recent)) {
+    const all = [c.item, ...c.related];
+    const sources = [...new Set(all.map((i) => i.source))];
+    const newest = Math.max(...all.map((i) => Date.parse(i.published)));
+    const oldest = Math.min(...all.map((i) => Date.parse(i.published)));
+    if (sources.length >= BREAK_MIN_SOURCES && now - newest < BREAK_FRESH_MIN * 60e3) {
+      // Prefer a news outlet's headline over a social post as the lead.
+      const lead = all.find((i) => !i.social) || c.item;
+      found.push({ lead, all, sources, oldest });
+    }
+  }
+  found.sort((a, b) => b.sources.length - a.sources.length || b.oldest - a.oldest);
+  state.breaking = found.slice(0, 5);
+  state.breakingIds = new Set(state.breaking.flatMap((b) => b.all.map((i) => i.id)));
+  renderBreaking();
+  notifyBreaking();
+}
+
+function notifyBreaking() {
+  const fresh = state.breaking.filter((b) => !b.all.some((i) => state.alerted.has(i.id)));
+  for (const b of state.breaking) for (const i of b.all) state.alerted.add(i.id);
+  store.set("alerted", [...state.alerted].slice(-3000));
+  // Don't fire for stories that were already breaking when the page opened.
+  if (Date.now() - PAGE_START < 30000) return;
+  if (!fresh.length) return;
+  if (state.sound) beep(990, 3);
+  if (state.alerts && "Notification" in window && Notification.permission === "granted") {
+    for (const b of fresh.slice(0, 3)) {
+      try {
+        const n = new Notification("BREAKING · " + b.sources.length + " sources", { body: b.lead.title + "\n" + b.sources.slice(0, 5).join(", "), tag: b.lead.id });
+        n.onclick = () => { window.focus(); jumpTo(b.lead.id); };
+      } catch { /* notifications unavailable */ }
+    }
+  }
+  if (document.hidden) document.title = "● BREAKING · The World Now";
+}
+
 // ---------- rendering ----------
 
 function filtered() {
@@ -139,10 +264,15 @@ function render() {
   const feed = $("feed");
   if (!state.view.length) {
     feed.innerHTML = '<div class="empty dim">' + (state.items.length ? "No headlines match the current filter." : "No stories available. Press [FETCH] to retrieve news.") + "</div>";
-    return;
+  } else {
+    feed.innerHTML = state.view.map((s, idx) => rowHTML(s, idx)).join("");
   }
-  feed.innerHTML = state.view.map((s, idx) => rowHTML(s, idx)).join("");
   if (state.panel === "heat") renderPanel();
+}
+
+function platform(item) {
+  if (!item.social) return "";
+  return '<span class="plat">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>";
 }
 
 function rowHTML({ item, related }, idx) {
@@ -150,21 +280,32 @@ function rowHTML({ item, related }, idx) {
   if (idx === state.sel) cls.push("sel");
   if (state.read.has(item.id)) cls.push("read");
   if (state.freshIds.has(item.id)) cls.push("fresh");
+  const breaking = state.breakingIds.has(item.id) || related.some((r) => state.breakingIds.has(r.id));
+  if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
-  let h = '<div class="' + cls.join(" ") + '" data-idx="' + idx + '" id="row-' + idx + '">';
+  let h = '<div class="' + cls.join(" ") + '" data-idx="' + idx + '" id="row-' + idx + '" data-item="' + item.id + '">';
   h += '<span class="time" title="' + esc(new Date(item.published).toUTCString()) + '">' + timeLabel(item.published) + "</span>";
-  h += '<span class="src" data-src="' + esc(item.source) + '" style="color:' + srcColor(item.source) + '" title="Filter by ' + esc(item.source) + '">' + esc(item.source) + "</span>";
-  h += '<div class="body"><a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + esc(item.title) + "</a>";
+  h += '<span class="src" data-src="' + esc(item.source) + '" style="color:' + srcColor(item.source) + '" title="Filter by ' + esc(item.source) + '">' + platform(item) + esc(item.source) + "</span>";
+  h += '<div class="body">' + (breaking ? '<span class="brk-tag">BREAKING</span>' : "");
+  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + esc(item.title) + "</a>";
   if (related.length) h += '<button class="more" data-toggle="' + item.id + '">' + (open ? "- collapse" : "+" + related.length + " related") + "</button>";
   if (state.video) h += videoLinks(item.title);
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div><span class="rs" style="color:' + srcColor(r.source) + '">' + esc(r.source) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div><span class="rs" style="color:' + srcColor(r.source) + '">' + platform(r) + esc(r.source) + '</span><span class="rt">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + esc(r.title) + "</a></div>").join("") + "</div>";
     }
   }
   return h + "</div></div>";
+}
+
+function renderBreaking() {
+  const el = $("breaking");
+  el.hidden = !state.breaking.length;
+  el.innerHTML = state.breaking.map((b) =>
+    '<div class="brk-row" data-jump="' + b.lead.id + '"><span class="brk-tag">BREAKING</span><span class="brk-title">' + esc(b.lead.title) +
+    '</span><span class="dim brk-meta">' + b.sources.length + " sources · first " + timeAgo(new Date(b.oldest).toISOString()) + " ago</span></div>").join("");
 }
 
 function videoLinks(title) {
@@ -176,10 +317,10 @@ function videoLinks(title) {
     '<a href="https://yandex.com/video/search?text=' + q + '&within=77" target="_blank" rel="noopener">[Yandex]</a></span>';
 }
 
-function renderStaged() {
+function renderStaged(n) {
   const el = $("staged");
-  el.hidden = !state.staged.length;
-  el.textContent = "[+" + state.staged.length + " NEW] press n or click to apply";
+  el.hidden = !n;
+  el.textContent = "[+" + n + " NEW] press n or click to apply";
 }
 
 function renderCats() {
@@ -191,6 +332,7 @@ function renderButtons() {
   const set = (id, on, onText, offText) => { const b = $(id); b.classList.toggle("on", on); b.textContent = on ? onText : offText; };
   set("btn-auto", state.auto, "[AUTO ON]", "[AUTO OFF]");
   set("btn-snd", state.sound, "[SND ON]", "[SND OFF]");
+  set("btn-alerts", state.alerts, "[ALERTS ON]", "[ALERTS OFF]");
   set("btn-cluster", state.cluster, "[CLUSTER]", "[CLUSTER]");
   set("btn-video", state.video, "[VIDEO]", "[VIDEO]");
   set("btn-heat", state.panel === "heat", "[HEATMAPS]", "[HEATMAPS]");
@@ -209,17 +351,22 @@ function renderPanel() {
 }
 
 function helpHTML() {
-  const rows = [["j / k", "Navigate headlines"], ["o / enter", "Open selected headline"], ["space", "Expand / collapse related"], ["/", "Focus search"], ["esc", "Clear search / close panel"], ["r", "Refresh now"], ["n", "Apply staged updates"], ["c", "Toggle clustering"], ["v", "Toggle video search links"], ["h", "Toggle heatmaps"], ["s", "Toggle source status"], ["?", "Toggle this help"]];
+  const rows = [["j / k", "Navigate headlines"], ["o / enter", "Open selected headline"], ["space", "Expand / collapse related"], ["/", "Focus search"], ["esc", "Clear search / close panel"], ["r", "Refresh now"], ["n", "Apply staged updates"], ["b", "Jump to top breaking story"], ["a", "Toggle breaking-news alerts"], ["c", "Toggle clustering"], ["v", "Toggle video search links"], ["h", "Toggle heatmaps"], ["s", "Toggle source status"], ["?", "Toggle this help"]];
   return "<h3>KEYBOARD SHORTCUTS</h3>" + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") +
-    '<p class="dim">Headlines come from public RSS feeds, collected every ~15 minutes by a GitHub Action. Click a source name to filter by it.</p>';
+    '<p class="dim">Headlines come from public RSS feeds, public Telegram channels and public Bluesky accounts, collected every ~5 minutes by a GitHub Action. Bluesky accounts are also checked live every minute. ' +
+    "A story is marked BREAKING when " + BREAK_MIN_SOURCES + "+ different sources report it within " + BREAK_WINDOW_H + "h and the latest report is under " + BREAK_FRESH_MIN + " min old. " +
+    "Social/OSINT posts (TG, BSKY) are unverified. Click a source name to filter by it.</p>";
 }
 
 function sourcesHTML() {
   const d = state.data;
   if (!d) return "<h3>SOURCES</h3><span class='dim'>No data yet.</span>";
-  const rows = [...d.sources].sort((a, b) => (a.ok === b.ok ? a.name.localeCompare(b.name) : a.ok ? 1 : -1));
-  return "<h3>SOURCES · " + d.sources_ok + "/" + d.sources_total + " OK · built " + timeAgo(d.generated_at) + " ago</h3>" +
-    rows.map((s) => '<div class="src-row"><span class="' + (s.ok ? "ok-c" : "bad-c") + '">' + (s.ok ? "●" : "✕") + "</span><span>" + esc(s.name) +
+  const rank = (s) => (!s.ok ? 0 : s.count === 0 ? 1 : 2);
+  const rows = [...d.sources].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const failing = d.sources.filter((s) => !s.ok).length, quiet = d.sources.filter((s) => s.ok && !s.count).length;
+  return "<h3>SOURCES · " + (d.sources_total - failing) + "/" + d.sources_total + " OK" + (quiet ? " (" + quiet + " quiet)" : "") + " · built " + timeAgo(d.generated_at) + " ago</h3>" +
+    rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "dim") + '">' + (!s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
+      (s.type ? ' <span class="plat">' + (s.type === "telegram" ? "TG" : "BSKY") + "</span>" : "") +
       '</span><span class="dim cat-c">' + esc(s.category) + '</span><span class="num">' + s.count + '</span><span class="err">' + esc(s.error || "") + "</span></div>").join("");
 }
 
@@ -258,9 +405,11 @@ function updateFreshness() {
   const d = state.data;
   if (!d) return;
   const age = (Date.now() - Date.parse(d.generated_at)) / 60000;
-  $("dot").className = "dot " + (age < 40 ? "ok" : age < 120 ? "warn" : "bad");
-  $("fresh").textContent = "data " + timeAgo(d.generated_at) + " ago · " + d.sources_ok + "/" + d.sources_total + " sources";
-  if (age >= 120) showError("Heads up: the feed hasn't been rebuilt for " + timeAgo(d.generated_at) + " — the GitHub Action may be failing.");
+  const ok = d.sources.filter((s) => s.ok).length;
+  $("dot").className = "dot " + (age < 20 ? "ok" : age < 60 ? "warn" : "bad");
+  $("fresh").textContent = "build " + timeAgo(d.generated_at) + " ago · " + ok + "/" + d.sources_total + " sources" +
+    (state.liveAt ? " · live " + (d.live || []).length + " bsky " + Math.round((Date.now() - state.liveAt) / 1000) + "s ago" : "");
+  if (age >= 60) showError("Heads up: the feed hasn't been rebuilt for " + timeAgo(d.generated_at) + " — the GitHub Action may be failing.");
 }
 
 function showError(msg) {
@@ -298,16 +447,19 @@ function srcColor(name) {
 }
 
 let audio;
-function beep() {
+function beep(freq = 880, times = 1) {
   try {
     audio = audio || new AudioContext();
-    const o = audio.createOscillator(), g = audio.createGain();
-    o.frequency.value = 880;
-    g.gain.setValueAtTime(0.05, audio.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.25);
-    o.connect(g).connect(audio.destination);
-    o.start();
-    o.stop(audio.currentTime + 0.25);
+    for (let k = 0; k < times; k++) {
+      const t0 = audio.currentTime + k * 0.18;
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.05, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+      o.connect(g).connect(audio.destination);
+      o.start(t0);
+      o.stop(t0 + 0.15);
+    }
   } catch { /* audio unavailable */ }
 }
 
@@ -328,6 +480,20 @@ function select(idx) {
   }
 }
 
+// Show a story in the feed: clear filters, expand its cluster and select it.
+function jumpTo(id) {
+  applyPending();
+  state.cat = "all"; state.source = null; state.query = ""; $("search").value = "";
+  renderCats();
+  render();
+  const idx = state.view.findIndex((s) => s.item.id === id || s.related.some((r) => r.id === id));
+  if (idx < 0) return;
+  state.expanded.add(state.view[idx].item.id);
+  render();
+  select(idx);
+  $("row-" + idx).scrollIntoView({ block: "center" });
+}
+
 function togglePanel(name) {
   state.panel = state.panel === name ? null : name;
   renderButtons();
@@ -339,25 +505,40 @@ function toggleExpand(id) {
   render();
 }
 
+async function toggleAlerts() {
+  if (!state.alerts && "Notification" in window && Notification.permission === "default") {
+    try { await Notification.requestPermission(); } catch { /* ignore */ }
+  }
+  state.alerts = !state.alerts;
+  if (state.alerts && "Notification" in window && Notification.permission === "denied") {
+    showError("Browser notifications are blocked for this site; alerts will only beep (turn on [SND]) and show in the BREAKING bar.");
+  }
+  store.set("alerts", state.alerts);
+  renderButtons();
+}
+
 // ---------- events ----------
 
 $("btn-fetch").onclick = () => load(true);
 $("btn-auto").onclick = () => { state.auto = !state.auto; store.set("auto", state.auto); renderButtons(); schedule(); };
 $("interval").onchange = (e) => { state.interval = +e.target.value; store.set("interval", state.interval); schedule(); };
 $("btn-snd").onclick = () => { state.sound = !state.sound; store.set("sound", state.sound); renderButtons(); if (state.sound) beep(); };
+$("btn-alerts").onclick = toggleAlerts;
 $("btn-cluster").onclick = () => { state.cluster = !state.cluster; store.set("cluster", state.cluster); renderButtons(); render(); };
 $("btn-video").onclick = () => { state.video = !state.video; store.set("video", state.video); renderButtons(); render(); };
 $("btn-heat").onclick = () => togglePanel("heat");
 $("btn-sources").onclick = () => togglePanel("sources");
 $("btn-help").onclick = () => togglePanel("help");
-$("staged").onclick = applyStaged;
+$("staged").onclick = applyPending;
 $("search").oninput = (e) => { state.query = e.target.value; state.sel = -1; render(); };
 
 document.addEventListener("click", (e) => {
   const t = e.target;
+  const jump = t.closest("[data-jump]");
+  if (jump) { jumpTo(jump.dataset.jump); return; }
   if (t.dataset.cat) { state.cat = t.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); }
   else if (t.id === "clear-src") { state.source = null; renderCats(); render(); }
-  else if (t.dataset.src) { state.source = t.dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo(0, 0); }
+  else if (t.closest("[data-src]")) { state.source = t.closest("[data-src]").dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo(0, 0); }
   else if (t.dataset.toggle) toggleExpand(t.dataset.toggle);
   else if (t.closest(".kw")) { const kw = t.closest(".kw").dataset.kw; $("search").value = kw; state.query = kw; render(); }
   else if (t.dataset.id) { markRead(t.dataset.id); const row = t.closest(".row"); if (row && t.classList.contains("title")) row.classList.add("read"); }
@@ -382,7 +563,9 @@ document.addEventListener("keydown", (e) => {
     case " ": if (cur) { toggleExpand(cur.item.id); select(state.sel); } break;
     case "/": $("search").focus(); break;
     case "r": load(true); break;
-    case "n": applyStaged(); break;
+    case "n": applyPending(); break;
+    case "b": if (state.breaking.length) jumpTo(state.breaking[0].lead.id); break;
+    case "a": toggleAlerts(); break;
     case "c": $("btn-cluster").click(); break;
     case "v": $("btn-video").click(); break;
     case "h": togglePanel("heat"); break;
@@ -393,16 +576,24 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
 });
 
-window.addEventListener("scroll", () => { if (window.scrollY < 60 && state.sel < 0 && state.staged.length) applyStaged(); }, { passive: true });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && state.auto) load(false); });
+window.addEventListener("scroll", () => { if (window.scrollY < 60 && state.sel < 0 && state.pending) applyPending(); }, { passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  document.title = "The World Now";
+  if (state.auto) { load(false); pollLive(false); }
+});
 
 setInterval(() => {
   const n = new Date();
   $("clock").textContent = n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 19) + " UTC";
 }, 1000);
-setInterval(() => { updateFreshness(); if (state.panel === "sources") renderPanel(); }, 30000);
+setInterval(() => {
+  updateFreshness();
+  if (state.panel === "sources") renderPanel();
+  if (state.items.length) computeBreaking(state.pending || state.items); // let stale stories drop off
+}, 30000);
 
 renderButtons();
 renderCats();
-load(false);
+load(false).then(() => pollLive(true));
 schedule();

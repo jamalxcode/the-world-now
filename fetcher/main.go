@@ -142,10 +142,12 @@ func main() {
 			st := SourceStatus{Name: src.Name, Category: src.Category, Type: src.Type, MS: time.Since(start).Milliseconds()}
 			if err != nil {
 				st.Error = err.Error()
-			} else if len(items) == 0 {
-				st.Error = "no recent items"
 			} else {
+				// Reachable and parseable counts as OK even if nothing is new.
 				st.OK, st.Count = true, len(items)
+				if len(items) == 0 {
+					st.Error = "quiet: nothing in the last " + fmt.Sprint(cfg.MaxAgeHours) + "h"
+				}
 			}
 			statuses[i], results[i] = st, items
 		}(i, src)
@@ -244,11 +246,13 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 	}
 
 	var items []Item
+	undated := 0
 	for _, e := range entries {
-		if e.title == "" || e.url == "" || matchesAny(exclude, e.title) {
+		if e.t.IsZero() {
+			undated++
 			continue
 		}
-		if e.t.IsZero() || e.t.Before(cutoff) {
+		if e.title == "" || e.url == "" || matchesAny(exclude, e.title) || e.t.Before(cutoff) {
 			continue
 		}
 		if e.t.After(now) { // some feeds stamp items in the future
@@ -280,6 +284,9 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		if len(items) >= limit {
 			break
 		}
+	}
+	if len(items) == 0 && undated > 0 && undated == len(entries) {
+		return nil, errors.New("no parseable dates in feed")
 	}
 	return items, nil
 }

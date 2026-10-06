@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>The World Now</title>
-    <meta name="description" content="Live world headlines from public news feeds, refreshed every 15 minutes." />
+    <meta name="description" content="Live world headlines from public news feeds, refreshed every few minutes." />
     <meta name="theme-color" content="#111111" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111'/><circle cx='8' cy='8' r='4' fill='%23FF5733'/></svg>" />
     <link rel="stylesheet" href="style.css" />
@@ -21,12 +21,14 @@
       <div class="controls">
         <button id="btn-auto" class="btn on">[AUTO ON]</button>
         <select id="interval" aria-label="Auto refresh interval">
+          <option value="30">30s</option>
           <option value="60">1m</option>
+          <option value="120">2m</option>
           <option value="300">5m</option>
-          <option value="900">15m</option>
         </select>
         <button id="btn-fetch" class="btn accent">[FETCH]</button>
         <button id="btn-snd" class="btn">[SND OFF]</button>
+        <button id="btn-alerts" class="btn" title="Browser notification when a story starts breaking">[ALERTS OFF]</button>
         <button id="btn-cluster" class="btn">[CLUSTER]</button>
         <button id="btn-video" class="btn">[VIDEO]</button>
         <button id="btn-heat" class="btn">[HEATMAPS]</button>
@@ -40,6 +42,7 @@
         <span id="cats" class="cats"></span>
         <span id="srcfilter" class="dim"></span>
       </div>
+      <div id="breaking" class="breaking" hidden></div>
       <div id="staged" class="staged" hidden></div>
       <div id="error" class="error" hidden></div>
     </header>
