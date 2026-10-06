@@ -47,12 +47,13 @@ X has no free API, and its RSS mirrors (Nitter, xcancel) are blocked, so X posts
 
 ## Editing sources
 
-Edit [`sources.json`](sources.json) and push. Every entry has a `name` and a `category` (`top`, `world`, `mideast`, `osint`, `defense`, `biz`, `tech`, `hazard` or `science`), plus one of these:
+Edit [`sources.json`](sources.json) and push. Every entry has a `name` and a `category` (`top`, `world`, `mideast`, `osint`, `defense`, `biz`, `tech`, `hazard` or `science`), plus one of these. For a YouTube channel, the `channel` is its ID (starts with `UC`), found in the page source of the channel page as `"externalId"`; check the feed name matches, because the first ID on a page can belong to a sister channel:
 
 ```json
 { "name": "BBC", "category": "world", "url": "https://feeds.bbci.co.uk/news/world/rss.xml" }
 { "name": "WarMonitors", "category": "osint", "type": "telegram", "channel": "warmonitors" }
 { "name": "Reuters", "category": "top", "type": "bluesky", "handle": "reuters.com" }
+{ "name": "CNN", "category": "world", "type": "youtube", "channel": "UCupvZG-5ko_eiXAupbDfxWw" }
 ```
 
 Only use public sources that need no sign-up. Some sites block GitHub's servers, so check the run log or the **[SOURCES]** panel after adding one.
