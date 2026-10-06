@@ -39,7 +39,7 @@ The design follows heat.sala.company: Inter, soft cards and an automatic light o
 
 ## Breaking news
 
-A story is marked **BREAKING** when 3 or more different sources report it within 3 hours and the latest report is under 90 minutes old. It appears in the red bar under the header. Turn on **[ALERTS]** (key `a`) for a browser notification when a new story starts breaking, and **[SND]** for a beep. The thresholds are constants at the top of `app.js`.
+A story is marked **BREAKING** when 3 or more different sources report it within 3 hours and the latest report is under 90 minutes old. It gets a red **Breaking** tag on its own row. The feed is always strictly newest first, with no separate breaking bar, because a bar of older stories above newer ones was confusing. Turn on **[ALERTS]** (key `a`) for a browser notification when a new story starts breaking, and **[SND]** for a beep. The thresholds are constants at the top of `app.js`.
 
 ## X (Twitter)
 

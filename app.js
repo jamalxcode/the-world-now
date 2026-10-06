@@ -256,7 +256,6 @@ function computeBreaking(items) {
   found.sort((a, b) => b.sources.length - a.sources.length || b.oldest - a.oldest);
   state.breaking = found.slice(0, 5);
   state.breakingIds = new Set(state.breaking.flatMap((b) => b.all.map((i) => i.id)));
-  renderBreaking();
   notifyBreaking();
 }
 
@@ -365,14 +364,6 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   return h + "</article>";
 }
 
-function renderBreaking() {
-  const el = $("breaking");
-  el.hidden = !state.breaking.length;
-  if (!state.breaking.length) return;
-  el.innerHTML = '<div class="brk-head"><span class="live"></span>Breaking now</div>' + state.breaking.map((b) =>
-    '<div class="brk-row" data-jump="' + b.lead.id + '" title="Show all reports"><span class="brk-title">' + esc(b.lead.title) +
-    '</span><span class="brk-meta">' + b.sources.length + " sources · first seen " + timeAgo(new Date(b.oldest).toISOString()) + " ago</span></div>").join("");
-}
 
 // Search links use a few keywords, not the whole headline: a full headline is so literal
 // that it often finds nothing. Each link asks for the newest results where the site allows it.
