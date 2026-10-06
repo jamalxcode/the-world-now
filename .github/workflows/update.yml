@@ -15,9 +15,12 @@ permissions:
   pages: write
   id-token: write
 
+# A newer run replaces an older one that is still going. On 6 Oct 2026 one deploy sat "waiting" on GitHub
+# for 7.5 hours and, with cancel-in-progress off, blocked every update behind it. A normal run takes
+# ~1.5 minutes and runs start every 5, so this only ever cancels a stuck run.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -53,6 +56,7 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
