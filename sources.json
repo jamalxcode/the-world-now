@@ -4,6 +4,7 @@
   "max_items": 700,
   "per_source_limit": 40,
   "min_ok_sources": 10,
+  "exclude_title_patterns": ["(?i)promo codes?", "(?i)coupons?", "(?i)\\d+% off", "(?i)best .* deals", "(?i)deals? of the day"],
   "sources": [
     { "name": "Google News", "category": "top", "aggregator": true, "url": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en" },
 

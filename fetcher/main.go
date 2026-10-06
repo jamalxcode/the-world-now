@@ -41,6 +41,7 @@ type Config struct {
 	MaxItems       int      `json:"max_items"`
 	PerSourceLimit int      `json:"per_source_limit"`
 	MinOKSources   int      `json:"min_ok_sources"`
+	Exclude        []string `json:"exclude_title_patterns"`
 	Sources        []Source `json:"sources"`
 }
 
@@ -121,6 +122,11 @@ func main() {
 	now := time.Now().UTC()
 	cutoff := now.Add(-time.Duration(cfg.MaxAgeHours) * time.Hour)
 	// Force HTTP/1.1: a few CDNs (CBC, NHK) reset Go's HTTP/2 streams.
+	var exclude []*regexp.Regexp
+	for _, p := range cfg.Exclude {
+		exclude = append(exclude, regexp.MustCompile(p))
+	}
+
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
 		Proxy:        http.ProxyFromEnvironment,
 		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
@@ -137,7 +143,7 @@ func main() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			start := time.Now()
-			items, err := fetchSource(client, src, cutoff, now, cfg.PerSourceLimit)
+			items, err := fetchSource(client, src, cutoff, now, cfg.PerSourceLimit, exclude)
 			st := SourceStatus{Name: src.Name, Category: src.Category, MS: time.Since(start).Milliseconds()}
 			if err != nil {
 				st.Error = err.Error()
@@ -204,7 +210,7 @@ func main() {
 	}
 }
 
-func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit int) ([]Item, error) {
+func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit int, exclude []*regexp.Regexp) ([]Item, error) {
 	req, err := http.NewRequest("GET", src.URL, nil)
 	if err != nil {
 		return nil, err
@@ -233,6 +239,9 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		title := cleanText(r.Title)
 		link := pickLink(r)
 		if title == "" || link == "" {
+			continue
+		}
+		if matchesAny(exclude, title) {
 			continue
 		}
 		t := parseDate(firstNonEmpty(r.PubDate, r.Published, r.Date, r.Updated))
@@ -395,6 +404,15 @@ func truncate(s string, n int) string {
 	}
 	r := []rune(s)[:n]
 	return strings.TrimSpace(string(r)) + "…"
+}
+
+func matchesAny(res []*regexp.Regexp, s string) bool {
+	for _, re := range res {
+		if re.MatchString(s) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(ss ...string) string {

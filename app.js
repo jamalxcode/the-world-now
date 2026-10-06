@@ -5,7 +5,7 @@ const CATS = [
   ["all", "ALL"], ["top", "TOP"], ["world", "WORLD"], ["mideast", "MIDEAST"],
   ["biz", "BIZ"], ["tech", "TECH"], ["defense", "DEFENSE"], ["science", "SCI"],
 ];
-const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last into over back after says said news live update updates latest video watch report reports".split(" ")));
+const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last into over back after says said news live update updates latest video watch report reports january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -94,7 +94,7 @@ function schedule() {
 // ---------- clustering ----------
 
 function tokens(title) {
-  return new Set(title.toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w)));
+  return new Set(title.toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)));
 }
 
 function clusterItems(items) {
