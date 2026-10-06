@@ -3,53 +3,77 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>The World Now</title>
-    <meta name="description" content="Live world headlines from public news feeds, refreshed every few minutes." />
-    <meta name="theme-color" content="#111111" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23111'/><circle cx='8' cy='8' r='4' fill='%23FF5733'/></svg>" />
+    <title>The World Now · news.sala.company</title>
+    <meta name="description" content="Live world headlines from about 95 public news, OSINT and disaster sources, refreshed every few minutes, with breaking-news alerts." />
+    <meta name="theme-color" content="#1f6fb0" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%8C%8D%3C/text%3E%3C/svg%3E" />
+    <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="style.css" />
+    <script>try { const t = JSON.parse(localStorage.getItem("twn-theme")); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
   </head>
   <body>
-    <header id="top">
-      <div class="line1">
-        <span class="brand">news.sala.company</span>
-        <span class="sep">//</span>
-        <span id="clock" class="clock">----</span>
-        <span id="dot" class="dot" title="data freshness"></span>
-        <span id="fresh" class="dim">loading…</span>
-      </div>
-      <div class="controls">
-        <button id="btn-auto" class="btn on">[AUTO ON]</button>
-        <select id="interval" aria-label="Auto refresh interval">
-          <option value="30">30s</option>
-          <option value="60">1m</option>
-          <option value="120">2m</option>
-          <option value="300">5m</option>
-        </select>
-        <button id="btn-fetch" class="btn accent">[FETCH]</button>
-        <button id="btn-snd" class="btn">[SND OFF]</button>
-        <button id="btn-alerts" class="btn" title="Browser notification when a story starts breaking">[ALERTS OFF]</button>
-        <button id="btn-cluster" class="btn">[CLUSTER]</button>
-        <button id="btn-video" class="btn">[VIDEO]</button>
-        <button id="btn-heat" class="btn">[HEATMAPS]</button>
-        <button id="btn-sources" class="btn">[SOURCES]</button>
-        <button id="btn-help" class="btn">[HELP]</button>
-        <span id="count" class="dim count">0 items</span>
-      </div>
-      <div class="controls">
-        <label class="dim" for="search">Search:</label>
-        <input id="search" type="search" placeholder="type / to focus" autocomplete="off" spellcheck="false" />
-        <span id="cats" class="cats"></span>
-        <span id="srcfilter" class="dim"></span>
-      </div>
-      <div id="breaking" class="breaking" hidden></div>
-      <div id="staged" class="staged" hidden></div>
-      <div id="error" class="error" hidden></div>
-    </header>
+    <div class="wrap">
+      <header class="top">
+        <div class="brand">
+          <div class="logo" aria-hidden="true"><span>🌍</span></div>
+          <h1><span class="news">news</span><span class="tld">.sala.company</span></h1>
+        </div>
+        <div class="fresh">
+          <span id="dot" class="dot"></span>
+          <span id="fresh">Loading…</span>
+          <span id="clock" class="clock"></span>
+        </div>
+        <button class="btn" id="btn-theme" title="Switch theme">◐ Auto</button>
+      </header>
 
-    <section id="panel" class="panel" hidden></section>
-    <main id="feed" class="feed"><div class="empty dim">Loading headlines…</div></main>
+      <div class="toolbar" id="top">
+        <div class="controls">
+          <button class="chip reset" id="btn-reset" title="Back to the default view: all categories, no search, grouped stories, everything collapsed">↺ Reset</button>
+          <div class="seg cats" id="cats" role="group" aria-label="Category"></div>
+          <label class="search">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" /><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+            <input id="search" type="search" placeholder="Search headlines" autocomplete="off" spellcheck="false" aria-label="Search headlines" />
+            <kbd>/</kbd>
+          </label>
+        </div>
+        <div class="controls sub">
+          <div class="seg" id="view" role="group" aria-label="Layout">
+            <button data-v="grouped" title="Group reports of the same story">Grouped</button>
+            <button data-v="flat" title="Every headline on its own row">All posts</button>
+          </div>
+          <div class="chips">
+            <button class="chip" id="btn-alerts" title="Browser notification when a story starts breaking (key a)">🔔 Alerts</button>
+            <button class="chip" id="btn-snd" title="Beep on new headlines and breaking stories">🔊 Sound</button>
+            <button class="chip" id="btn-video" title="Show video search links under each headline">▶ Video links</button>
+            <button class="chip" id="btn-auto" title="Check for new headlines automatically">⟳ Auto</button>
+            <select id="interval" aria-label="Auto refresh interval" class="chip">
+              <option value="30">every 30s</option>
+              <option value="60">every 1m</option>
+              <option value="120">every 2m</option>
+              <option value="300">every 5m</option>
+            </select>
+          </div>
+          <span class="spacer"></span>
+          <span id="count" class="count"></span>
+          <button class="btn" id="btn-fetch" title="Check for new headlines now (key r)">Refresh</button>
+          <button class="btn" id="btn-heat" title="Trending terms and volume (key h)">Trends</button>
+          <button class="btn" id="btn-sources" title="Status of every source (key s)">Sources</button>
+          <button class="btn" id="btn-help" title="Keyboard shortcuts and how it works (key ?)">?</button>
+        </div>
+        <div id="srcfilter" class="note" hidden></div>
+        <button id="staged" class="staged" hidden></button>
+        <div id="error" class="error" hidden></div>
+      </div>
 
+      <section id="breaking" class="breaking" hidden aria-live="polite"></section>
+      <section id="panel" class="card panel" hidden></section>
+      <main id="feed" class="card feed"><div class="empty">Loading headlines…</div></main>
+
+      <footer class="foot">
+        Headlines from public RSS feeds, Telegram channels and Bluesky accounts, collected every ~5 minutes by GitHub Actions. Social and OSINT posts (TG, BSKY) are unverified.
+        <a href="https://github.com/jamalxcode/the-world-now">Source on GitHub</a>
+      </footer>
+    </div>
     <script src="app.js"></script>
   </body>
 </html>

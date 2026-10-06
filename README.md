@@ -21,6 +21,10 @@ Live world headlines at **https://news.sala.company**. It runs entirely on GitHu
 - **`index.html`, `app.js`, `style.css`**: a static page with no build step. It loads `feed.json`, polls for new builds and checks the Bluesky accounts **live every 60 seconds** between builds.
 - **`.github/workflows/update.yml`**: runs every 5 minutes (GitHub's minimum, and runs can start a few minutes late), on every push and on demand (**Actions → Update news & deploy → Run workflow**). Only `main` deploys.
 
+## Look and controls
+
+The design follows heat.sala.company: Inter, soft cards and an automatic light or dark theme (switch with the ◐ button). **↺ Reset** (key `x`) clears the search and filters, closes panels and goes back to the default view. It keeps your theme, alerts and sound settings.
+
 ## Breaking news
 
 A story is marked **BREAKING** when 3 or more different sources report it within 3 hours and the latest report is under 90 minutes old. It appears in the red bar under the header. Turn on **[ALERTS]** (key `a`) for a browser notification when a new story starts breaking, and **[SND]** for a beep. The thresholds are constants at the top of `app.js`.
@@ -57,4 +61,4 @@ python -m http.server 8000         # or any static server, then open http://loca
 
 ## Keyboard
 
-`j`/`k` navigate · `o` open · `space` expand related · `/` search · `r` refresh · `n` apply new · `b` jump to breaking · `a` alerts · `c` cluster · `v` video links · `h` heatmaps · `s` sources · `?` help
+`x` ↺ reset view · `j`/`k` navigate · `o` open · `space` more reports · `/` search · `r` refresh · `n` apply new · `b` jump to breaking · `a` alerts · `c` cluster · `v` video links · `h` heatmaps · `s` sources · `?` help

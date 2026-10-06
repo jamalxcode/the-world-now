@@ -258,6 +258,9 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		if e.title == "" || e.url == "" || matchesAny(exclude, e.title) || e.t.Before(cutoff) {
 			continue
 		}
+		if social && len(strings.Fields(e.title)) < 4 { // "Good morning", "Thread:", …
+			continue
+		}
 		if e.t.After(now) { // some feeds stamp items in the future
 			e.t = now
 		}

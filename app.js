@@ -3,8 +3,8 @@
 "use strict";
 
 const CATS = [
-  ["all", "ALL"], ["top", "TOP"], ["world", "WORLD"], ["mideast", "MIDEAST"], ["osint", "OSINT"],
-  ["defense", "DEFENSE"], ["biz", "BIZ"], ["tech", "TECH"], ["hazard", "HAZARD"], ["science", "SCI"],
+  ["all", "All"], ["top", "Top"], ["world", "World"], ["mideast", "Middle East"], ["osint", "OSINT"],
+  ["defense", "Defense"], ["biz", "Business"], ["tech", "Tech"], ["hazard", "Hazards"], ["science", "Science"],
 ];
 const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last back news live update updates latest video watch report reports breaking urgent according officials official people told january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
 
@@ -15,6 +15,10 @@ const BREAK_WINDOW_H = 3;
 const BREAK_FRESH_MIN = 90;
 const LIVE_POLL_S = 60;
 const PAGE_START = Date.now();
+
+// What ↺ Reset returns to. Theme, alerts and sound are personal settings and stay as they are.
+const DEFAULTS = { cat: "all", cluster: true, video: false, auto: true, interval: 120 };
+const THEMES = ["", "light", "dark"], THEME_LABEL = { "": "◐ Auto", light: "☀ Light", dark: "☾ Dark" };
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -33,13 +37,14 @@ const state = {
   breakingIds: new Set(),
   alerted: new Set(store.get("alerted", [])),
   read: new Set(store.get("read", [])),
-  auto: store.get("auto", true),
-  interval: store.get("interval", 120),
+  auto: store.get("auto", DEFAULTS.auto),
+  interval: store.get("interval", DEFAULTS.interval),
   sound: store.get("sound", false),
   alerts: store.get("alerts", false),
-  cluster: store.get("cluster", true),
-  video: store.get("video", false),
-  cat: store.get("cat", "all"),
+  cluster: store.get("cluster", DEFAULTS.cluster),
+  video: store.get("video", DEFAULTS.video),
+  cat: store.get("cat", DEFAULTS.cat),
+  theme: store.get("theme", ""),
   source: null,
   query: "",
   panel: null,
@@ -55,7 +60,7 @@ const state = {
 async function load(manual) {
   if (state.loading) return;
   state.loading = true;
-  $("btn-fetch").textContent = "[....]";
+  $("btn-fetch").textContent = "Refreshing…";
   try {
     const res = await fetch("feed.json?t=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -67,11 +72,11 @@ async function load(manual) {
     if (changed) update(manual);
     if (manual) pollLive(true);
   } catch (e) {
-    showError("Could not load feed.json (" + e.message + "). " + (state.items.length ? "Showing last loaded headlines." : "Press [FETCH] to retry."));
-    if (!state.items.length) $("feed").innerHTML = '<div class="empty dim">No stories available. Press [FETCH] to retry.</div>';
+    showError("Couldn't load the latest headlines (" + e.message + "). " + (state.items.length ? "Showing the last ones loaded." : "Press Refresh to try again."));
+    if (!state.items.length) $("feed").innerHTML = '<div class="empty">No headlines yet. Press Refresh to try again.</div>';
   } finally {
     state.loading = false;
-    $("btn-fetch").textContent = "[FETCH]";
+    $("btn-fetch").textContent = "Refresh";
   }
 }
 
@@ -118,7 +123,7 @@ function bskyItem(it, src) {
     url = ext.uri;
     if (ext.title && (title.length < 30 || title.includes("http"))) title = ext.title.trim();
   }
-  if (!title) return null;
+  if (title.split(/\s+/).filter(Boolean).length < 4) return null; // same rule as the fetcher
   return { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
 }
 
@@ -127,16 +132,6 @@ function splitPost(text) {
   text = text.replace(/(https?:\/\/\S+|\b[a-z0-9-]+\.(rs|com|org|net|co|ly|gl|me|news|io|tv|uk)\/\S*)/gi, "");
   const lines = text.split("\n").map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (!lines.length) return ["", ""];
-  const [t, r] = splitLines(lines);
-  return [tidyPostTitle(t), r];
-}
-
-function tidyPostTitle(t) {
-  for (let i = 0; i < 3; i++) t = t.replace(/^[^\p{L}\p{N}"'“(#]+/u, "").replace(/^#?(breaking|urgent|just in|flash)\b\s*[:\-–—|]*\s*/i, "");
-  return t.replace(/#(\p{L})/gu, "$1").trim();
-}
-
-function splitLines(lines) {
   let title = lines[0], rest = lines.slice(1).join(" ");
   if (title.length < 25 && rest) { title += " " + rest; rest = ""; }
   if (title.length > 220) {
@@ -145,7 +140,12 @@ function splitLines(lines) {
     rest = (title.slice(cut) + " " + rest).trim();
     title = title.slice(0, cut).trim() + (cut === 220 ? "…" : "");
   }
-  return [title, rest.slice(0, 280)];
+  return [tidyPostTitle(title), rest.slice(0, 280)];
+}
+
+function tidyPostTitle(t) {
+  for (let i = 0; i < 3; i++) t = t.replace(/^[^\p{L}\p{N}"'“(#]+/u, "").replace(/^#?(breaking|urgent|just in|flash)\b\s*[:\-–—|]*\s*/i, "");
+  return t.replace(/#(\p{L})/gu, "$1").trim();
 }
 
 function combined() {
@@ -249,12 +249,12 @@ function notifyBreaking() {
   if (state.alerts && "Notification" in window && Notification.permission === "granted") {
     for (const b of fresh.slice(0, 3)) {
       try {
-        const n = new Notification("BREAKING · " + b.sources.length + " sources", { body: b.lead.title + "\n" + b.sources.slice(0, 5).join(", "), tag: b.lead.id });
+        const n = new Notification("Breaking · " + b.sources.length + " sources", { body: b.lead.title + "\n" + b.sources.slice(0, 5).join(", "), tag: b.lead.id });
         n.onclick = () => { window.focus(); jumpTo(b.lead.id); };
       } catch { /* notifications unavailable */ }
     }
   }
-  if (document.hidden) document.title = "● BREAKING · The World Now";
+  if (document.hidden) document.title = "● Breaking · The World Now";
 }
 
 // ---------- rendering ----------
@@ -271,20 +271,21 @@ function render() {
   const list = filtered();
   state.view = state.cluster ? clusterItems(list) : list.map((item) => ({ item, related: [] }));
   if (state.sel >= state.view.length) state.sel = state.view.length - 1;
-  $("count").textContent = list.length + " items" + (state.cluster ? " · " + state.view.length + " stories" : "");
+  $("count").textContent = state.cluster ? state.view.length + " stories · " + list.length + " reports" : list.length + " headlines";
 
   const feed = $("feed");
   if (!state.view.length) {
-    feed.innerHTML = '<div class="empty dim">' + (state.items.length ? "No headlines match the current filter." : "No stories available. Press [FETCH] to retrieve news.") + "</div>";
+    feed.innerHTML = '<div class="empty">' + (state.items.length ? 'Nothing matches these filters. <button class="chip reset" data-reset>↺ Reset</button>' : "No headlines yet. Press Refresh to try again.") + "</div>";
   } else {
     feed.innerHTML = state.view.map((s, idx) => rowHTML(s, idx)).join("");
   }
+  renderCatCounts();
   if (state.panel === "heat") renderPanel();
 }
 
-function platform(item) {
-  if (!item.social) return "";
-  return '<span class="plat">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>";
+function srcHTML(item, tag) {
+  return "<" + tag + ' class="src" data-src="' + esc(item.source) + '" style="--h:' + srcHue(item.source) + '" title="Show only ' + esc(item.source) + '">' + esc(item.source) + "</" + tag + ">" +
+    (item.social ? ' <span class="plat" title="Social post, unverified">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>" : "");
 }
 
 function rowHTML({ item, related }, idx) {
@@ -295,62 +296,87 @@ function rowHTML({ item, related }, idx) {
   const breaking = state.breakingIds.has(item.id) || related.some((r) => state.breakingIds.has(r.id));
   if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
-  let h = '<div class="' + cls.join(" ") + '" data-idx="' + idx + '" id="row-' + idx + '" data-item="' + item.id + '">';
-  h += '<span class="time" title="' + esc(new Date(item.published).toUTCString()) + '">' + timeLabel(item.published) + "</span>";
-  h += '<span class="src" data-src="' + esc(item.source) + '" style="color:' + srcColor(item.source) + '" title="Filter by ' + esc(item.source) + '">' + platform(item) + esc(item.source) + "</span>";
-  h += '<div class="body">' + (breaking ? '<span class="brk-tag">BREAKING</span>' : "");
+  let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
+  h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
+    '<span title="' + esc(new Date(item.published).toUTCString()) + '">' + timeAgo(item.published) + " ago · " + hhmm(item.published) + " UTC</span></div>";
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + esc(item.title) + "</a>";
-  if (related.length) h += '<button class="more" data-toggle="' + item.id + '">' + (open ? "- collapse" : "+" + related.length + " related") + "</button>";
-  if (state.video) h += videoLinks(item.title);
+  let actions = "";
+  if (related.length || item.summary) {
+    const label = related.length ? (open ? "Hide " : "") + related.length + " more report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
+    actions += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
+  }
+  if (state.video) actions += videoLinks(item.title);
+  if (actions) h += '<div class="actions">' + actions + "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div><span class="rs" style="color:' + srcColor(r.source) + '">' + platform(r) + esc(r.source) + '</span><span class="rt">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + esc(r.title) + "</a></div>").join("") + "</div>";
     }
   }
-  return h + "</div></div>";
+  return h + "</article>";
 }
 
 function renderBreaking() {
   const el = $("breaking");
   el.hidden = !state.breaking.length;
-  el.innerHTML = state.breaking.map((b) =>
-    '<div class="brk-row" data-jump="' + b.lead.id + '"><span class="brk-tag">BREAKING</span><span class="brk-title">' + esc(b.lead.title) +
-    '</span><span class="dim brk-meta">' + b.sources.length + " sources · first " + timeAgo(new Date(b.oldest).toISOString()) + " ago</span></div>").join("");
+  if (!state.breaking.length) return;
+  el.innerHTML = '<div class="brk-head"><span class="live"></span>Breaking now</div>' + state.breaking.map((b) =>
+    '<div class="brk-row" data-jump="' + b.lead.id + '" title="Show all reports"><span class="brk-title">' + esc(b.lead.title) +
+    '</span><span class="brk-meta">' + b.sources.length + " sources · first seen " + timeAgo(new Date(b.oldest).toISOString()) + " ago</span></div>").join("");
 }
 
 function videoLinks(title) {
   const q = encodeURIComponent(title.split(/\s+/).slice(0, 10).join(" "));
   return '<span class="vids">' +
-    '<a href="https://news.google.com/search?q=' + q + '" target="_blank" rel="noopener">[Goog]</a>' +
-    '<a href="https://www.youtube.com/results?search_query=' + q + '&sp=EgIIAQ%253D%253D" target="_blank" rel="noopener">[Youtube]</a>' +
-    '<a href="https://rumble.com/search/video?q=' + q + '&date=today" target="_blank" rel="noopener">[Rumble]</a>' +
-    '<a href="https://yandex.com/video/search?text=' + q + '&within=77" target="_blank" rel="noopener">[Yandex]</a></span>';
+    '<a href="https://news.google.com/search?q=' + q + '" target="_blank" rel="noopener">Google News</a>' +
+    '<a href="https://www.youtube.com/results?search_query=' + q + '&sp=EgIIAQ%253D%253D" target="_blank" rel="noopener">YouTube</a>' +
+    '<a href="https://rumble.com/search/video?q=' + q + '&date=today" target="_blank" rel="noopener">Rumble</a>' +
+    '<a href="https://yandex.com/video/search?text=' + q + '&within=77" target="_blank" rel="noopener">Yandex</a></span>';
 }
 
 function renderStaged(n) {
   const el = $("staged");
   el.hidden = !n;
-  el.textContent = "[+" + n + " NEW] press n or click to apply";
+  el.textContent = "↑ " + n + " new headline" + (n === 1 ? "" : "s");
 }
 
 function renderCats() {
-  $("cats").innerHTML = CATS.map(([k, label]) => '<button class="cat' + (state.cat === k ? " on" : "") + '" data-cat="' + k + '">[' + label + "]</button>").join("");
-  $("srcfilter").innerHTML = state.source ? "source: " + esc(state.source) + ' <button id="clear-src" title="Clear source filter">[x]</button>' : "";
+  $("cats").innerHTML = CATS.map(([k, label]) => '<button data-cat="' + k + '" aria-pressed="' + (state.cat === k) + '">' + label + '<span class="n"></span></button>').join("");
+  renderCatCounts();
+  const note = $("srcfilter");
+  note.hidden = !state.source;
+  note.innerHTML = state.source ? "Showing only <b>" + esc(state.source) + '</b><button class="chip" id="clear-src">✕ Show all sources</button>' : "";
+}
+
+function renderCatCounts() {
+  const counts = {};
+  for (const i of state.items) counts[i.category] = (counts[i.category] || 0) + 1;
+  document.querySelectorAll("#cats button").forEach((b) => {
+    const k = b.dataset.cat;
+    b.querySelector(".n").textContent = k === "all" ? "" : counts[k] || 0;
+  });
 }
 
 function renderButtons() {
-  const set = (id, on, onText, offText) => { const b = $(id); b.classList.toggle("on", on); b.textContent = on ? onText : offText; };
-  set("btn-auto", state.auto, "[AUTO ON]", "[AUTO OFF]");
-  set("btn-snd", state.sound, "[SND ON]", "[SND OFF]");
-  set("btn-alerts", state.alerts, "[ALERTS ON]", "[ALERTS OFF]");
-  set("btn-cluster", state.cluster, "[CLUSTER]", "[CLUSTER]");
-  set("btn-video", state.video, "[VIDEO]", "[VIDEO]");
-  set("btn-heat", state.panel === "heat", "[HEATMAPS]", "[HEATMAPS]");
-  set("btn-sources", state.panel === "sources", "[SOURCES]", "[SOURCES]");
-  set("btn-help", state.panel === "help", "[HELP]", "[HELP]");
+  const press = (id, on) => $(id).setAttribute("aria-pressed", on);
+  press("btn-auto", state.auto);
+  press("btn-snd", state.sound);
+  press("btn-alerts", state.alerts);
+  press("btn-video", state.video);
+  press("btn-heat", state.panel === "heat");
+  press("btn-sources", state.panel === "sources");
+  press("btn-help", state.panel === "help");
+  document.querySelectorAll("#view button").forEach((b) => b.setAttribute("aria-pressed", (b.dataset.v === "grouped") === state.cluster));
   $("interval").value = String(state.interval);
+  $("interval").disabled = !state.auto;
+}
+
+function renderAll() {
+  renderButtons();
+  renderCats();
+  renderPanel();
+  render();
 }
 
 function renderPanel() {
@@ -363,23 +389,24 @@ function renderPanel() {
 }
 
 function helpHTML() {
-  const rows = [["j / k", "Navigate headlines"], ["o / enter", "Open selected headline"], ["space", "Expand / collapse related"], ["/", "Focus search"], ["esc", "Clear search / close panel"], ["r", "Refresh now"], ["n", "Apply staged updates"], ["b", "Jump to top breaking story"], ["a", "Toggle breaking-news alerts"], ["c", "Toggle clustering"], ["v", "Toggle video search links"], ["h", "Toggle heatmaps"], ["s", "Toggle source status"], ["?", "Toggle this help"]];
-  return "<h3>KEYBOARD SHORTCUTS</h3>" + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") +
-    '<p class="dim">Headlines come from public RSS feeds, public Telegram channels and public Bluesky accounts, collected every ~5 minutes by a GitHub Action. Bluesky accounts are also checked live every minute. ' +
-    "A story is marked BREAKING when " + BREAK_MIN_SOURCES + "+ different sources report it within " + BREAK_WINDOW_H + "h and the latest report is under " + BREAK_FRESH_MIN + " min old. " +
-    "Social/OSINT posts (TG, BSKY) are unverified. Click a source name to filter by it.</p>";
+  const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["v", "Video links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
+  return '<div class="panel-grid"><div><h2>Keyboard shortcuts</h2>' + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") + "</div>" +
+    "<div><h2>How it works</h2><p>Headlines come from about 95 public sources: news sites' RSS feeds, public Telegram channels and public Bluesky accounts. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
+    "<p><b>Grouped</b> puts reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
+    "<p>Posts marked <b>TG</b> (Telegram) or <b>BSKY</b> (Bluesky) come from social accounts and are unverified. Click a source's name to show only that source.</p>" +
+    "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your theme, alerts and sound settings stay as they are.</p></div></div>";
 }
 
 function sourcesHTML() {
   const d = state.data;
-  if (!d) return "<h3>SOURCES</h3><span class='dim'>No data yet.</span>";
+  if (!d) return "<h2>Sources</h2><p>No data yet.</p>";
   const rank = (s) => (!s.ok ? 0 : s.count === 0 ? 1 : 2);
   const rows = [...d.sources].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   const failing = d.sources.filter((s) => !s.ok).length, quiet = d.sources.filter((s) => s.ok && !s.count).length;
-  return "<h3>SOURCES · " + (d.sources_total - failing) + "/" + d.sources_total + " OK" + (quiet ? " (" + quiet + " quiet)" : "") + " · built " + timeAgo(d.generated_at) + " ago</h3>" +
-    rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "dim") + '">' + (!s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
+  return "<h2>Sources · " + (d.sources_total - failing) + " of " + d.sources_total + " working" + (quiet ? " (" + quiet + " quiet)" : "") + ' <span class="count">· updated ' + timeAgo(d.generated_at) + " ago</span></h2>" +
+    '<div class="src-list">' + rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "q-c") + '" title="' + (!s.ok ? "failing" : s.count ? "working" : "quiet") + '">' + (!s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
       (s.type ? ' <span class="plat">' + (s.type === "telegram" ? "TG" : "BSKY") + "</span>" : "") +
-      '</span><span class="dim cat-c">' + esc(s.category) + '</span><span class="num">' + s.count + '</span><span class="err">' + esc(s.error || "") + "</span></div>").join("");
+      '</span><span class="count">' + esc(catLabel(s.category)) + '</span><span class="num">' + s.count + "</span>" + (s.error ? '<span class="err">' + esc(s.error) + "</span>" : "") + "</div>").join("") + "</div>";
 }
 
 function heatHTML() {
@@ -389,8 +416,8 @@ function heatHTML() {
   for (const i of recent) for (const t of tokens(i.title)) counts.set(t, (counts.get(t) || 0) + 1);
   const top = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 18);
   const max = top.length ? top[0][1] : 1;
-  let kw = "<div><h3>TRENDING TERMS · LAST 6H</h3>";
-  kw += top.length ? top.map(([t, n]) => '<div class="kw" data-kw="' + esc(t) + '"><span class="kw-label">' + esc(t) + '</span><div class="bar" style="width:' + Math.max(4, (n / max) * 100) + '%"></div><span class="num">' + n + "</span></div>").join("") : '<span class="dim">Not enough data.</span>';
+  let kw = "<div><h2>Trending terms</h2><h3>Most-used words in headlines, last 6 hours. Click one to search.</h3>";
+  kw += top.length ? top.map(([t, n]) => '<div class="kw" data-kw="' + esc(t) + '"><span class="kw-label">' + esc(t) + '</span><div class="bar" style="width:' + Math.max(4, (n / max) * 100) + '%"></div><span class="num">' + n + "</span></div>").join("") : "<p>Not enough data yet.</p>";
   kw += "</div>";
 
   const hours = 24, cats = CATS.slice(1);
@@ -401,12 +428,13 @@ function heatHTML() {
     const c = cats.findIndex(([k]) => k === i.category);
     if (h >= 0 && h < hours && c >= 0) peak = Math.max(peak, ++grid[c][hours - 1 - h]);
   }
-  let hm = '<div><h3>VOLUME BY CATEGORY · LAST 24H (→ now)</h3><div class="heat" style="grid-template-columns:auto repeat(' + hours + ',1fr)">';
+  const shade = (v) => "var(--heat-" + (v === 0 ? 0 : Math.min(4, 1 + Math.floor((v / peak) * 3.999))) + ")";
+  let hm = '<div><h2>Volume by category</h2><h3>Headlines per hour, last 24 hours (newest on the right)</h3><div class="heat" style="grid-template-columns:auto repeat(' + hours + ',1fr)">';
   cats.forEach(([, label], c) => {
     hm += '<span class="lbl">' + label + "</span>";
     for (let h = 0; h < hours; h++) {
       const v = grid[c][h];
-      hm += '<span class="cell" title="' + label + ": " + v + " in hour -" + (hours - h) + '" style="background:' + (v ? "rgba(255,87,51," + (0.12 + 0.88 * v / peak).toFixed(2) + ")" : "#1a1a1a") + '"></span>';
+      hm += '<span class="cell" title="' + label + ": " + v + " headline" + (v === 1 ? "" : "s") + ", " + (hours - h) + 'h ago" style="background:' + shade(v) + '"></span>';
     }
   });
   hm += "</div></div>";
@@ -419,9 +447,9 @@ function updateFreshness() {
   const age = (Date.now() - Date.parse(d.generated_at)) / 60000;
   const ok = d.sources.filter((s) => s.ok).length;
   $("dot").className = "dot " + (age < 20 ? "ok" : age < 60 ? "warn" : "bad");
-  $("fresh").textContent = "build " + timeAgo(d.generated_at) + " ago · " + ok + "/" + d.sources_total + " sources" +
-    (state.liveAt ? " · live " + (d.live || []).length + " bsky " + Math.round((Date.now() - state.liveAt) / 1000) + "s ago" : "");
-  if (age >= 60) showError("Heads up: the feed hasn't been rebuilt for " + timeAgo(d.generated_at) + " — the GitHub Action may be failing.");
+  $("fresh").innerHTML = "<b>Updated " + timeAgo(d.generated_at) + " ago</b> · " + ok + " of " + d.sources_total + " sources" +
+    (state.liveAt ? " · Bluesky live, checked " + Math.round((Date.now() - state.liveAt) / 1000) + "s ago" : "");
+  if (age >= 60) showError("The headlines haven't been updated for " + timeAgo(d.generated_at) + ". The GitHub Action may be failing.");
 }
 
 function showError(msg) {
@@ -436,6 +464,11 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function catLabel(k) {
+  const c = CATS.find(([key]) => key === k);
+  return c ? c[1] : k;
+}
+
 function timeAgo(iso) {
   const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
   if (m < 60) return m + "m";
@@ -443,19 +476,19 @@ function timeAgo(iso) {
   return h < 48 ? h + "h" + (h < 6 && m % 60 ? " " + (m % 60) + "m" : "") : Math.floor(h / 24) + "d";
 }
 
-function timeLabel(iso) {
+function hhmm(iso) {
   const d = new Date(iso);
-  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") + ' <span style="color:var(--faint)">' + timeAgo(iso) + "</span>";
+  return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0");
 }
 
-const colorCache = new Map();
-function srcColor(name) {
-  if (!colorCache.has(name)) {
+const hueCache = new Map();
+function srcHue(name) {
+  if (!hueCache.has(name)) {
     let h = 0;
     for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    colorCache.set(name, "hsl(" + (h % 360) + ",62%,64%)");
+    hueCache.set(name, h % 360);
   }
-  return colorCache.get(name);
+  return hueCache.get(name);
 }
 
 let audio;
@@ -487,12 +520,12 @@ function select(idx) {
   const row = $("row-" + state.sel);
   if (row) {
     row.classList.add("sel");
-    const top = row.getBoundingClientRect().top, hdr = $("top").offsetHeight;
-    if (top < hdr + 4 || top > window.innerHeight - 40) row.scrollIntoView({ block: top < hdr ? "center" : "nearest" });
+    const top = row.getBoundingClientRect().top, hdr = $("top").getBoundingClientRect().bottom;
+    if (top < hdr + 4 || top > window.innerHeight - 60) row.scrollIntoView({ block: "center" });
   }
 }
 
-// Show a story in the feed: clear filters, expand its cluster and select it.
+// Show a story in the feed: clear filters, expand its group and select it.
 function jumpTo(id) {
   applyPending();
   state.cat = "all"; state.source = null; state.query = ""; $("search").value = "";
@@ -506,6 +539,21 @@ function jumpTo(id) {
   $("row-" + idx).scrollIntoView({ block: "center" });
 }
 
+// ↺ Reset: back to the default view in one click.
+function reset() {
+  Object.assign(state, DEFAULTS, { source: null, query: "", panel: null, sel: -1 });
+  state.expanded.clear();
+  state.read.clear();
+  for (const [k, v] of Object.entries(DEFAULTS)) store.set(k, v);
+  store.set("read", []);
+  $("search").value = "";
+  $("search").blur();
+  applyPending();
+  schedule();
+  renderAll();
+  window.scrollTo({ top: 0 });
+}
+
 function togglePanel(name) {
   state.panel = state.panel === name ? null : name;
   renderButtons();
@@ -517,40 +565,60 @@ function toggleExpand(id) {
   render();
 }
 
+function setCluster(on) {
+  state.cluster = on;
+  store.set("cluster", on);
+  state.sel = -1;
+  renderButtons();
+  render();
+}
+
 async function toggleAlerts() {
   if (!state.alerts && "Notification" in window && Notification.permission === "default") {
     try { await Notification.requestPermission(); } catch { /* ignore */ }
   }
   state.alerts = !state.alerts;
   if (state.alerts && "Notification" in window && Notification.permission === "denied") {
-    showError("Browser notifications are blocked for this site; alerts will only beep (turn on [SND]) and show in the BREAKING bar.");
+    showError("Notifications are blocked for this site in your browser settings. Breaking stories will still show at the top, and beep if Sound is on.");
   }
   store.set("alerts", state.alerts);
   renderButtons();
 }
 
+function applyTheme(th) {
+  state.theme = th;
+  if (th) document.documentElement.dataset.theme = th; else delete document.documentElement.dataset.theme;
+  $("btn-theme").textContent = THEME_LABEL[th];
+  store.set("theme", th);
+}
+
 // ---------- events ----------
 
 $("btn-fetch").onclick = () => load(true);
+$("btn-reset").onclick = reset;
+$("btn-theme").onclick = () => applyTheme(THEMES[(THEMES.indexOf(state.theme) + 1) % THEMES.length]);
 $("btn-auto").onclick = () => { state.auto = !state.auto; store.set("auto", state.auto); renderButtons(); schedule(); };
 $("interval").onchange = (e) => { state.interval = +e.target.value; store.set("interval", state.interval); schedule(); };
 $("btn-snd").onclick = () => { state.sound = !state.sound; store.set("sound", state.sound); renderButtons(); if (state.sound) beep(); };
 $("btn-alerts").onclick = toggleAlerts;
-$("btn-cluster").onclick = () => { state.cluster = !state.cluster; store.set("cluster", state.cluster); renderButtons(); render(); };
 $("btn-video").onclick = () => { state.video = !state.video; store.set("video", state.video); renderButtons(); render(); };
 $("btn-heat").onclick = () => togglePanel("heat");
 $("btn-sources").onclick = () => togglePanel("sources");
 $("btn-help").onclick = () => togglePanel("help");
-$("staged").onclick = applyPending;
+$("view").onclick = (e) => { const b = e.target.closest("button"); if (b) setCluster(b.dataset.v === "grouped"); };
+$("staged").onclick = () => { applyPending(); window.scrollTo({ top: 0 }); };
 $("search").oninput = (e) => { state.query = e.target.value; state.sel = -1; render(); };
 
 document.addEventListener("click", (e) => {
   const t = e.target;
   const jump = t.closest("[data-jump]");
-  if (jump) { jumpTo(jump.dataset.jump); return; }
-  if (t.dataset.cat) { state.cat = t.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); }
+  const cat = t.closest("[data-cat]");
+  const src = t.closest("[data-src]");
+  if (jump) jumpTo(jump.dataset.jump);
+  else if (t.closest("[data-reset]")) reset();
+  else if (cat) { state.cat = cat.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); }
   else if (t.id === "clear-src") { state.source = null; renderCats(); render(); }
-  else if (t.closest("[data-src]")) { state.source = t.closest("[data-src]").dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo(0, 0); }
+  else if (src) { state.source = src.dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo({ top: 0 }); }
   else if (t.dataset.toggle) toggleExpand(t.dataset.toggle);
   else if (t.closest(".kw")) { const kw = t.closest(".kw").dataset.kw; $("search").value = kw; state.query = kw; render(); }
   else if (t.dataset.id) { markRead(t.dataset.id); const row = t.closest(".row"); if (row && t.classList.contains("title")) row.classList.add("read"); }
@@ -574,11 +642,12 @@ document.addEventListener("keydown", (e) => {
     case "o": case "Enter": if (cur) { markRead(cur.item.id); window.open(cur.item.url, "_blank", "noopener"); render(); } break;
     case " ": if (cur) { toggleExpand(cur.item.id); select(state.sel); } break;
     case "/": $("search").focus(); break;
+    case "x": reset(); break;
     case "r": load(true); break;
     case "n": applyPending(); break;
     case "b": if (state.breaking.length) jumpTo(state.breaking[0].lead.id); break;
     case "a": toggleAlerts(); break;
-    case "c": $("btn-cluster").click(); break;
+    case "c": setCluster(!state.cluster); break;
     case "v": $("btn-video").click(); break;
     case "h": togglePanel("heat"); break;
     case "s": togglePanel("sources"); break;
@@ -591,21 +660,20 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("scroll", () => { if (window.scrollY < 60 && state.sel < 0 && state.pending) applyPending(); }, { passive: true });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  document.title = "The World Now";
+  document.title = "The World Now · news.sala.company";
   if (state.auto) { load(false); pollLive(false); }
 });
 
-setInterval(() => {
-  const n = new Date();
-  $("clock").textContent = n.toISOString().slice(0, 10) + " " + n.toISOString().slice(11, 19) + " UTC";
-}, 1000);
+function tick() { $("clock").textContent = hhmm(new Date().toISOString()) + " UTC"; }
+setInterval(tick, 15000);
 setInterval(() => {
   updateFreshness();
   if (state.panel === "sources") renderPanel();
   if (state.items.length) computeBreaking(state.pending || state.items); // let stale stories drop off
 }, 30000);
 
-renderButtons();
-renderCats();
+applyTheme(state.theme);
+tick();
+renderAll();
 load(false).then(() => pollLive(true));
 schedule();
