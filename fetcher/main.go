@@ -56,6 +56,7 @@ type Item struct {
 	Published string `json:"published"`
 	Summary   string `json:"summary,omitempty"`
 	Social    bool   `json:"social,omitempty"`
+	Media     string `json:"media,omitempty"` // "video" or "audio"
 
 	t time.Time
 }
@@ -63,6 +64,7 @@ type Item struct {
 // entry is a parsed item before filtering, whatever the source type.
 type entry struct {
 	id, title, url, summary, outlet string
+	media                           string // hint from the source's markup: "video", "audio" or ""
 	t                               time.Time
 }
 
@@ -285,6 +287,7 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 			Published: e.t.UTC().Format(time.RFC3339),
 			Summary:   e.summary,
 			Social:    social,
+			Media:     detectMedia(e.media, e.url, e.title),
 			t:         e.t,
 		})
 		if len(items) >= limit {
@@ -384,6 +387,40 @@ func tidyPostTitle(t string) string {
 		t = breakingRE.ReplaceAllString(leadSymRE.ReplaceAllString(t, ""), "")
 	}
 	return strings.TrimSpace(hashtagRE.ReplaceAllString(t, "$1"))
+}
+
+// Video and audio are recognised from the source's own markup when it has
+// any, otherwise from well-known URL shapes and "Watch:"/"Listen:" titles.
+// app.js mirrors these patterns for posts it polls live.
+var (
+	videoURLRE   = regexp.MustCompile(`(?i)(/videos?/|/av/|/watch/|/clip/|/live-video|youtube\.com/(watch|shorts|live)|youtu\.be/|vimeo\.com/|rumble\.com/|\.(mp4|m3u8|webm)(\?|$))`)
+	audioURLRE   = regexp.MustCompile(`(?i)(/podcasts?/|/audio/|/sounds/|/listen/|/radio/|open\.spotify\.com/(episode|show)|podcasts\.apple\.com/|soundcloud\.com/|\.(mp3|m4a|ogg)(\?|$))`)
+	videoTitleRE = regexp.MustCompile(`(?i)^(watch|video|live video)\s*[:|–—-]`)
+	audioTitleRE = regexp.MustCompile(`(?i)^(listen|podcast|audio)\s*[:|–—-]`)
+)
+
+func detectMedia(hint, u, title string) string {
+	switch {
+	case hint != "":
+		return hint
+	case videoURLRE.MatchString(u) || videoTitleRE.MatchString(title):
+		return "video"
+	case audioURLRE.MatchString(u) || audioTitleRE.MatchString(title):
+		return "audio"
+	}
+	return ""
+}
+
+// mediaFromType maps a MIME type or media:content medium to "video"/"audio".
+func mediaFromType(s string) string {
+	s = strings.ToLower(s)
+	switch {
+	case strings.HasPrefix(s, "video"):
+		return "video"
+	case strings.HasPrefix(s, "audio"):
+		return "audio"
+	}
+	return ""
 }
 
 func normTitle(s string) string {

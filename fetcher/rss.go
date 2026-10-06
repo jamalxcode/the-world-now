@@ -24,12 +24,45 @@ type xmlItem struct {
 	Description string    `xml:"description"`
 	Summary     string    `xml:"summary"`
 	Source      string    `xml:"source"`
+	// Media hints: RSS <enclosure>, Media RSS <media:content> (bare or inside <media:group>).
+	// Atom <content> and content:encoded also land in Media, harmlessly: their type is html/text.
+	Enclosures []xmlMedia `xml:"enclosure"`
+	Media      []xmlMedia `xml:"content"`
+	MediaGroup []xmlMedia `xml:"group>content"`
 }
 
 type xmlLink struct {
 	Href string `xml:"href,attr"`
 	Rel  string `xml:"rel,attr"`
+	Type string `xml:"type,attr"`
 	Text string `xml:",chardata"`
+}
+
+type xmlMedia struct {
+	Type   string `xml:"type,attr"`
+	Medium string `xml:"medium,attr"`
+}
+
+// mediaHint returns "video" or "audio" if the item carries such a file.
+func mediaHint(it xmlItem) string {
+	found := ""
+	note := func(m string) {
+		if m == "video" || (m == "audio" && found == "") {
+			found = m
+		}
+	}
+	for _, list := range [][]xmlMedia{it.Enclosures, it.Media, it.MediaGroup} {
+		for _, m := range list {
+			note(mediaFromType(m.Medium))
+			note(mediaFromType(m.Type))
+		}
+	}
+	for _, l := range it.Links {
+		if l.Rel == "enclosure" {
+			note(mediaFromType(l.Type))
+		}
+	}
+	return found
 }
 
 func parseFeed(body []byte) ([]entry, error) {
@@ -77,6 +110,7 @@ func parseFeed(body []byte) ([]entry, error) {
 			url:     pickLink(it),
 			summary: truncate(cleanText(firstNonEmpty(it.Description, it.Summary)), 280),
 			outlet:  cleanText(it.Source),
+			media:   mediaHint(it),
 			t:       parseDate(firstNonEmpty(it.PubDate, it.Published, it.Date, it.Updated)),
 		}
 		if e.title == "" && e.summary != "" { // title-less feeds (e.g. microblogs)

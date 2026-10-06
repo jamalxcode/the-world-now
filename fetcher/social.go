@@ -37,11 +37,19 @@ func parseTelegram(body []byte) ([]entry, error) {
 		text := html.UnescapeString(tagRE.ReplaceAllString(brRE.ReplaceAllString(m[1], "\n"), ""))
 		title, summary := splitPost(text)
 		t, _ := time.Parse(time.RFC3339, tm[1])
+		media := ""
+		switch {
+		case strings.Contains(c, "tgme_widget_message_video") || strings.Contains(c, "tgme_widget_message_roundvideo"):
+			media = "video"
+		case strings.Contains(c, "tgme_widget_message_voice") || strings.Contains(c, "tgme_widget_message_audio"):
+			media = "audio"
+		}
 		entries = append(entries, entry{
 			id:      "tg-" + strings.ReplaceAll(post, "/", "-"),
 			title:   title,
 			url:     "https://t.me/" + post,
 			summary: summary,
+			media:   media,
 			t:       t,
 		})
 	}
@@ -64,10 +72,14 @@ type bskyFeed struct {
 				CreatedAt string `json:"createdAt"`
 			} `json:"record"`
 			Embed struct {
+				Type     string `json:"$type"`
 				External *struct {
 					URI   string `json:"uri"`
 					Title string `json:"title"`
 				} `json:"external"`
+				Media *struct { // recordWithMedia: a quote post plus attached media
+					Type string `json:"$type"`
+				} `json:"media"`
 			} `json:"embed"`
 		} `json:"post"`
 		Reason json.RawMessage `json:"reason"` // set for reposts
@@ -95,7 +107,11 @@ func parseBluesky(body []byte, handle string) ([]entry, error) {
 			}
 		}
 		t, _ := time.Parse(time.RFC3339, p.Record.CreatedAt)
-		entries = append(entries, entry{id: "bsky-" + rkey, title: title, url: link, summary: summary, t: t})
+		media := ""
+		if strings.HasPrefix(p.Embed.Type, "app.bsky.embed.video") || (p.Embed.Media != nil && strings.HasPrefix(p.Embed.Media.Type, "app.bsky.embed.video")) {
+			media = "video"
+		}
+		entries = append(entries, entry{id: "bsky-" + rkey, title: title, url: link, summary: summary, media: media, t: t})
 	}
 	return entries, nil
 }
