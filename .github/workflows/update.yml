@@ -1,8 +1,12 @@
+# Fetch every source on GitHub's servers and publish the site + feed.json to GitHub Pages.
+# Timer: cron-job.org starts this every 5 minutes through GitHub's API (workflow_dispatch), as on
+# heat.sala.company. GitHub's own schedule is often late or skipped (zero runs in the first 3 hours here),
+# so it is only a backup, offset from the top-of-hour rush.
 name: Update news & deploy
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # GitHub's minimum; runs can start a few minutes late
+    - cron: "2-59/5 * * * *"
   push:
   workflow_dispatch:
 

@@ -1,0 +1,27 @@
+# Hourly check that the live site's headlines are still updating. Every update run can "succeed" while the
+# timer has stopped firing; this catches that. A failure sends GitHub's failed-workflow email.
+# cron-job.org starts it every hour (workflow_dispatch); GitHub's own schedule below is only a backup.
+name: Freshness check
+
+on:
+  schedule:
+    - cron: "43 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: feed.json must be under 30 minutes old
+        run: |
+          generated=$(curl -fsS "https://news.sala.company/feed.json?t=$(date +%s)" | jq -r .generated_at)
+          age=$(( ($(date -u +%s) - $(date -u -d "$generated" +%s)) / 60 ))
+          echo "feed.json generated at $generated ($age min ago)"
+          if [ "$age" -gt 30 ]; then
+            echo "::error::Headlines are $age minutes old. Check the cron-job.org job and the 'Update news & deploy' runs."
+            exit 1
+          fi

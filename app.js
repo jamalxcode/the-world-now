@@ -374,13 +374,52 @@ function renderBreaking() {
     '</span><span class="brk-meta">' + b.sources.length + " sources · first seen " + timeAgo(new Date(b.oldest).toISOString()) + " ago</span></div>").join("");
 }
 
+// Search links use a few keywords, not the whole headline: a full headline is so literal
+// that it often finds nothing. Each link asks for the newest results where the site allows it.
+const SEARCH_LINKS = [
+  ["X", (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
+  ["YouTube", (q) => "https://www.youtube.com/results?search_query=" + q + "&sp=EgIIAw%253D%253D"], // uploaded this week; YouTube no longer sorts by date
+  ["Google News", (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
+  ["Rumble", (q) => "https://rumble.com/search/video?q=" + q + "&sort=date"], // newest first
+  ["Yandex", (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
+];
+// Filler words and weak verbs that make a search too literal.
+const SEARCH_STOP = new Set(("the and for are was were has had have his her its our not but all any can out who how why what when where new one two " +
+  "says said say tell tells told after over amid amidst report reports video videos watch live latest update updates breaking exclusive analysis opinion " +
+  "will would could should than then them they this that these those with from into onto about against more most " +
+  "plan plans set sets get gets make makes take takes hit hits seek seeks warn warns urge urges call calls vow vows eye eyes face faces look looks " +
+  "launch launches secure secures weigh weighs announce announced announces speak speaks hold holds held reach reaching reached see sees come comes " +
+  "move moves back backs push pushes probe probes split splits").split(" "));
+
+// Keywords for search: the names in the headline (capitalised words) topped up with its first ordinary
+// keywords, in headline order: 3 words, or 4 when there are 3 names.
+// "Italy regulator probes AI music startup Suno over terms of service" → "Italy regulator Suno".
+function searchQuery(title) {
+  const seen = new Set();
+  const words = title.replace(/@\w+/g, " ").replace(/[’']s\b/g, "").replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/)
+    .filter((w) => {
+      const k = w.toLowerCase();
+      if (w.length < 3 || !/^\p{L}/u.test(w) || STOP.has(k) || SEARCH_STOP.has(k) || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  if (!words.length) return encodeURIComponent(title.split(/\s+/).slice(0, 4).join(" "));
+  const isName = (w) => /^\p{Lu}/u.test(w);
+  const names = words.filter(isName);
+  let pick;
+  if (names.length >= words.length * 0.7) pick = words.slice(0, 3); // Title Case Headline: capitals tell us nothing
+  else {
+    const keep = new Set(names.slice(0, 3));
+    const target = keep.size === 3 ? 4 : 3;
+    for (const w of words) if (keep.size < target && !isName(w)) keep.add(w);
+    pick = words.filter((w) => keep.has(w));
+  }
+  return encodeURIComponent(pick.join(" "));
+}
+
 function videoLinks(title) {
-  const q = encodeURIComponent(title.split(/\s+/).slice(0, 10).join(" "));
-  return '<span class="vids">' +
-    '<a href="https://news.google.com/search?q=' + q + '" target="_blank" rel="noopener">Google News</a>' +
-    '<a href="https://www.youtube.com/results?search_query=' + q + '&sp=EgIIAQ%253D%253D" target="_blank" rel="noopener">YouTube</a>' +
-    '<a href="https://rumble.com/search/video?q=' + q + '&date=today" target="_blank" rel="noopener">Rumble</a>' +
-    '<a href="https://yandex.com/video/search?text=' + q + '&within=77" target="_blank" rel="noopener">Yandex</a></span>';
+  const q = searchQuery(title);
+  return '<span class="vids">' + SEARCH_LINKS.map(([name, url]) => '<a href="' + esc(url(q)) + '" target="_blank" rel="noopener">' + name + "</a>").join("") + "</span>";
 }
 
 function renderStaged(n) {
@@ -439,7 +478,7 @@ function renderPanel() {
 }
 
 function helpHTML() {
-  const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["d", "Comfortable / compact"], ["v", "Video links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
+  const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["d", "Comfortable / compact"], ["v", "Search links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
   return '<div class="panel-grid"><div><h2>Keyboard shortcuts</h2>' + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") + "</div>" +
     "<div><h2>How it works</h2><p>Headlines come from about 95 public sources: news sites' RSS feeds, public Telegram channels and public Bluesky accounts. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
     "<p><b>Grouped</b> puts reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
@@ -499,7 +538,7 @@ function updateFreshness() {
   $("dot").className = "dot " + (age < 20 ? "ok" : age < 60 ? "warn" : "bad");
   $("fresh").innerHTML = "<b>Updated " + timeAgo(d.generated_at) + " ago</b> · " + ok + " of " + d.sources_total + " sources" +
     (state.liveAt ? " · Bluesky live, checked " + Math.round((Date.now() - state.liveAt) / 1000) + "s ago" : "");
-  if (age >= 60) showError("The headlines haven't been updated for " + timeAgo(d.generated_at) + ". The GitHub Action may be failing.");
+  if (age >= 60) showError("Updates are running late: the last one was " + timeAgo(d.generated_at) + " ago. Bluesky posts still arrive live.");
 }
 
 function showError(msg) {
