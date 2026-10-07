@@ -99,8 +99,6 @@
     { "name": "WarTranslated", "category": "osint", "type": "telegram", "channel": "wartranslated" },
     { "name": "Insider Paper", "category": "osint", "type": "telegram", "channel": "insiderpaper" },
     { "name": "TankerTrackers", "category": "osint", "type": "telegram", "channel": "TankerTrackers" },
-    { "name": "RT", "category": "osint", "type": "telegram", "channel": "rtnews" },
-    { "name": "Sputnik", "category": "osint", "type": "telegram", "channel": "SputnikInt" },
     { "name": "NOELreports", "category": "osint", "type": "bluesky", "handle": "noelreports.com" },
     { "name": "ISW", "category": "osint", "type": "bluesky", "handle": "thestudyofwar.bsky.social" },
     { "name": "Bellingcat", "category": "osint", "type": "bluesky", "handle": "bellingcat.com" },
