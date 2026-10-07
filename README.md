@@ -45,6 +45,10 @@ A story is marked **BREAKING** when 3 or more different sources report it within
 
 X has no free API, and its RSS mirrors (Nitter, xcancel) are blocked, so X posts can't be read without a paid account. Instead the site follows the same OSINT accounts where they cross-post publicly: Telegram (OSINTdefender, WarMonitors, Clash Report, Rerum Novarum, WarTranslated…) and Bluesky (NOELreports, ISW, Bellingcat…). Posts from social sources are tagged **TG** or **BSKY** and are unverified.
 
+## Non-English sources (for the Meridian map)
+
+[`sources-local.json`](sources-local.json) lists Arabic, Russian and Ukrainian sources. The same workflow builds them into a separate `local.json` (also with carry-forward), which only the [Meridian map](https://github.com/jamalxcode/globe) reads; this site's own page doesn't show them. If that build fails, `feed.json` still publishes.
+
 ## Editing sources
 
 Edit [`sources.json`](sources.json) and push. Every entry has a `name` and a `category` (`top`, `world`, `mideast`, `osint`, `defense`, `biz`, `tech`, `hazard` or `science`), plus one of these. For a YouTube channel, the `channel` is its ID (starts with `UC`), found in the page source of the channel page as `"externalId"`; check the feed name matches, because the first ID on a page can belong to a sister channel:

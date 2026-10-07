@@ -1,0 +1,20 @@
+{
+  "_note": "Non-English sources (Arabic, Russian, Ukrainian), built into local.json for the Meridian map only; news.sala.company's own page doesn't read it. Same format as sources.json.",
+  "max_age_hours": 48,
+  "max_items": 1500,
+  "per_source_limit": 60,
+  "min_ok_sources": 3,
+  "exclude_title_patterns": [],
+  "sources": [
+    { "name": "BBC Arabic", "category": "world", "url": "https://feeds.bbci.co.uk/arabic/rss.xml" },
+    { "name": "Al Jazeera Arabic", "category": "mideast", "url": "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9" },
+    { "name": "Sky News Arabia", "category": "mideast", "url": "https://www.skynewsarabia.com/rss.xml" },
+    { "name": "RT Arabic", "category": "world", "url": "https://arabic.rt.com/rss/" },
+    { "name": "BBC Russian", "category": "world", "url": "https://feeds.bbci.co.uk/russian/rss.xml" },
+    { "name": "Meduza (Russian)", "category": "world", "url": "https://meduza.io/rss/all" },
+    { "name": "TASS", "category": "world", "url": "https://tass.ru/rss/v2.xml" },
+    { "name": "Astra", "category": "osint", "type": "telegram", "channel": "astrapress" },
+    { "name": "Ukrainska Pravda (Ukrainian)", "category": "world", "url": "https://www.pravda.com.ua/rss/view_news/" },
+    { "name": "BBC Ukrainian", "category": "world", "url": "https://feeds.bbci.co.uk/ukrainian/rss.xml" }
+  ]
+}

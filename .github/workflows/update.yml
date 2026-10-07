@@ -40,6 +40,9 @@ jobs:
           # -carry keeps the previous build's headlines until they're 48 h old: most feeds only list their
           # latest ~15 stories, which would leave the second day nearly empty.
           go run ./fetcher -sources sources.json -out _site/feed.json -carry https://news.sala.company/feed.json
+          # Arabic, Russian and Ukrainian sources for the Meridian map (jamalxcode/globe) only. If this fails,
+          # the main feed above still publishes.
+          go run ./fetcher -sources sources-local.json -out _site/local.json -carry https://news.sala.company/local.json || echo "local.json skipped"
 
       # Browsers may reuse app.js and style.css for 10 minutes, so right after a release a page could mix
       # new HTML with old scripts. Tag both addresses with the commit so each release loads its own files.
