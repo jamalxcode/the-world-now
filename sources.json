@@ -46,6 +46,8 @@
     { "name": "Ukrinform", "category": "world", "url": "https://www.ukrinform.net/rss/block-lastnews" },
     { "name": "Meduza", "category": "world", "url": "https://meduza.io/rss/en/all" },
     { "name": "Moscow Times", "category": "world", "url": "https://www.themoscowtimes.com/rss/news" },
+    { "name": "RT", "category": "world", "url": "https://www.rt.com/rss/news/" },
+    { "name": "Sputnik", "category": "world", "url": "https://sputnikglobe.com/export/rss2/archive/index.xml" },
     { "name": "Politico", "category": "world", "url": "https://rss.politico.com/politics-news.xml" },
     { "name": "The Hill", "category": "world", "url": "https://thehill.com/news/feed/" },
     { "name": "Axios", "category": "world", "url": "https://api.axios.com/feed/" },
