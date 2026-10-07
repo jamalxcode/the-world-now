@@ -1,7 +1,7 @@
 {
   "_note": "Public sources only, no API keys or sign-ups. Types: RSS/Atom (url), telegram (public channel), bluesky (public account, also polled live by the browser), youtube (channel ID, from the channel's public video feed). Categories: top | world | mideast | biz | tech | defense | osint | hazard | science. Edit and push; the next run picks it up.",
   "max_age_hours": 48,
-  "max_items": 2600,
+  "max_items": 3200,
   "per_source_limit": 60,
   "min_ok_sources": 20,
   "exclude_title_patterns": ["(?i)promo codes?", "(?i)coupons?", "(?i)\\d+% off", "(?i)best .* deals", "(?i)deals? of the day"],

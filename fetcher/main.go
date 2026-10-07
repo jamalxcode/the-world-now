@@ -97,6 +97,7 @@ type Output struct {
 func main() {
 	srcPath := flag.String("sources", "sources.json", "sources config")
 	outPath := flag.String("out", "feed.json", "output file")
+	carryURL := flag.String("carry", "", "URL of the previously published feed.json; its headlines under max_age_hours are kept")
 	flag.Parse()
 
 	raw, err := os.ReadFile(*srcPath)
@@ -173,6 +174,17 @@ func main() {
 			all = append(all, it)
 		}
 	}
+	// Most feeds list only their latest ~15 stories, so a story drops out long before it is 48 hours old.
+	// Keep what the previous build already had, so the whole max_age_hours window stays filled.
+	if *carryURL != "" {
+		carried, err := carryForward(client, *carryURL, cfg, cutoff, exclude, seenURL, seenTitle)
+		if err != nil {
+			log.Printf("carry-forward skipped: %v", err)
+		} else {
+			log.Printf("carried %d items from the previous build", len(carried))
+			all = append(all, carried...)
+		}
+	}
 	sort.SliceStable(all, func(a, b int) bool { return all[a].t.After(all[b].t) })
 	if len(all) > cfg.MaxItems {
 		all = all[:cfg.MaxItems]
@@ -215,6 +227,46 @@ func main() {
 	if err := os.WriteFile(*outPath, buf, 0o644); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// carryForward returns the previous build's items that are still inside the age window, pass the exclude
+// patterns, and aren't already in this build (by URL or title). It marks what it returns in seenURL/seenTitle.
+// Items of a source removed from sources.json age out within max_age_hours.
+func carryForward(client *http.Client, feedURL string, cfg Config, cutoff time.Time, exclude []*regexp.Regexp, seenURL, seenTitle map[string]bool) ([]Item, error) {
+	sep := "?"
+	if strings.Contains(feedURL, "?") {
+		sep = "&"
+	}
+	body, err := get(client, feedURL+sep+"carry="+fmt.Sprint(time.Now().Unix()), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	var prev Output
+	if err := json.Unmarshal(body, &prev); err != nil {
+		return nil, fmt.Errorf("parse previous feed: %w", err)
+	}
+	var out []Item
+	for _, it := range prev.Items {
+		t, err := time.Parse(time.RFC3339, it.Published)
+		if err != nil || t.Before(cutoff) {
+			continue
+		}
+		skip := false
+		for _, re := range exclude {
+			if re.MatchString(it.Title) {
+				skip = true
+				break
+			}
+		}
+		u, n := normURL(it.URL), normTitle(it.Title)
+		if skip || seenURL[u] || seenTitle[n] {
+			continue
+		}
+		seenURL[u], seenTitle[n] = true, true
+		it.t = t
+		out = append(out, it)
+	}
+	return out, nil
 }
 
 func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit int, exclude []*regexp.Regexp) ([]Item, error) {

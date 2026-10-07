@@ -17,7 +17,7 @@ Live world headlines at **https://news.sala.company**. It runs entirely on GitHu
   - **Public Telegram channels**, read from their no-login web preview (`t.me/s/<channel>`). Many OSINT accounts that started on X also post there.
   - **Public Bluesky accounts**, read through the public API with no account needed.
 
-  It then drops items older than 48 hours, removes duplicates and writes `feed.json`.
+  It then drops items older than 48 hours, removes duplicates and writes `feed.json`. Most feeds only list their latest ~15 stories, so each build also **carries forward** the previous build's headlines (`-carry`, read from the live `feed.json`) until they are 48 hours old; otherwise the second day would be nearly empty. A source removed from `sources.json` ages out within 48 hours.
 - **`index.html`, `app.js`, `style.css`**: a static page with no build step. It loads `feed.json`, polls for new builds and checks the Bluesky accounts **live every 60 seconds** between builds.
 - **`.github/workflows/update.yml`**: started every 5 minutes by cron-job.org (see **Timers**), on every push and on demand (**Actions → Update news & deploy → Run workflow**). Only `main` deploys.
 - **`.github/workflows/freshness.yml`**: hourly check that the live `feed.json` is under 30 minutes old. If it isn't, the run fails and GitHub emails you.
