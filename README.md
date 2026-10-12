@@ -40,6 +40,8 @@ The design follows heat.sala.company: Inter, soft cards and an automatic light o
 - **One slim bar** holds what's used all the time: ↺ Reset, the categories, 📍 location and search. Everything else (layout, time range, search links, auto-refresh, alerts, sound, Trends, Sources, Help) is in the **⚙ View** menu.
 - **Each headline is two short lines**: the headline, then "source · +N reports". The exact time, 👍 / 👎, copies and search links appear on hover (computer) or after tapping **⋯** (phone).
 - **Near me** shows 8 stories per section with "See all N →"; the other views use **Last hour / 1–3 hours ago / Earlier today / Yesterday** dividers instead of an age on every row.
+- **Top stories now** (Near me and All): the 6 most-reported stories of the last 6 hours, scored by number of different sources × freshness, more for breaking stories and, in Near me, for stories near you. "N reports →" opens the story in the feed without leaving your view. **Hide** folds it away (↺ Reset brings it back). On phones the cards are one swipeable row.
+- **Side panel** on screens 1200px and wider: trending words (click to search), your 👍 sources (click to show only one), and source status. Narrower screens keep the same things under ⚙ View.
 
 **Comfortable / Compact** (key `d`) switches between larger headlines with details and one headline per line. Headlines with video show 📺 and ones with audio (podcasts, voice notes) show 🔊, detected from the source's media tags, Telegram and Bluesky video posts, and video or podcast links. **🔎 Search links** (on by default, key `v`) adds X, YouTube, Google News, Yandex Video and Bilibili searches to each headline's actions. Their words are chosen to pin the story down without being too literal (`storyTerms` in `app.js`):
 

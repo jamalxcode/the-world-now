@@ -119,6 +119,7 @@ const state = {
   sectionsOpen: new Set(), // "Near me" sections showing all their stories
   actsOpen: null, // the row whose actions were opened with ⋯ (phones)
   editTerms: null, // the story whose search words are being chosen (✎)
+  topHidden: store.get("top-hidden", false), // the Top stories strip folded away
   theme: store.get("theme", ""),
   source: null,
   query: "",
@@ -190,6 +191,7 @@ async function pollLive(force) {
   for (const [id, it] of state.live) if (Date.parse(it.published) < cutoff) state.live.delete(id);
   state.liveAt = new Date();
   updateFreshness();
+  renderRail(); // "updated 3m ago"
   if (added) update(false);
 }
 
@@ -517,6 +519,8 @@ function render() {
     feed.innerHTML = h;
   }
   renderHiddenNote(list);
+  renderTop();
+  renderRail();
   renderCatCounts();
   if (state.panel === "heat") renderPanel();
 }
@@ -527,6 +531,80 @@ function renderHiddenNote() {
   el.hidden = !hidden.length;
   el.innerHTML = hidden.length ? "👎 Hiding " + hidden.length + " source" + (hidden.length > 1 ? "s" : "") + ": " + hidden.slice(0, 4).map(esc).join(", ") + (hidden.length > 4 ? "…" : "") +
     ' <button class="chip" data-manage>Manage</button>' : "";
+}
+
+// ---------- top stories ----------
+
+// The biggest stories right now: many different sources × fresh, more for breaking, more near you.
+// Only in Near me and All, and not while searching or showing one source.
+const TOP_COUNT = 6;
+function topStories() {
+  const now = Date.now();
+  const recent = state.items.filter((i) => now - Date.parse(i.published) < 6 * 3600e3 && !hiddenSource(i.source) &&
+    (state.cat === "near" || i.category !== "local"));
+  const near = state.cat === "near" && state.country;
+  const scored = [];
+  for (const s of preferFavourites(clusterItems(recent))) {
+    const all = [s.item, ...s.related];
+    const sources = new Set(all.map((i) => i.source));
+    if (sources.size < 3) continue;
+    const newest = Math.max(...all.map((i) => Date.parse(i.published)));
+    const ageH = (now - newest) / 3600e3;
+    const breaking = all.some((i) => state.breakingIds.has(i.id));
+    const ring = near ? storyRing(s) : 3;
+    const score = sources.size * Math.exp(-ageH / 4) * (breaking ? 1.5 : 1) * (near ? [1.8, 1.4, 1.15, 1][ring] : 1);
+    // The headline: a 👍 source's (preferFavourites), else a news outlet's rather than a social post.
+    const lead = rating(s.item.source) > 0 ? s.item : all.find((i) => !i.social) || s.item;
+    scored.push({ lead, sources: [...sources], reports: all.length, newest, breaking, ring, score });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, TOP_COUNT);
+}
+
+function renderTop() {
+  const el = $("topstories");
+  const show = (state.cat === "near" || state.cat === "all") && !state.query && !state.source && state.items.length;
+  el.hidden = !show;
+  if (!show) return;
+  if (state.topHidden) { el.innerHTML = '<button class="chip ts-show" data-top-toggle>▸ Top stories now</button>'; return; }
+  const top = topStories();
+  if (!top.length) { el.hidden = true; return; }
+  const titles = ringTitles();
+  el.innerHTML = '<div class="ts-head"><h2>Top stories now</h2><span class="ts-sub">most-reported in the last 6 hours</span><button class="chip" data-top-toggle title="Hide top stories">Hide</button></div>' +
+    '<div class="ts-grid">' + top.map((t) => {
+      const others = t.sources.filter((s) => s !== t.lead.source);
+      return '<article class="ts-card' + (t.breaking ? " brk" : "") + '">' +
+        '<div class="ts-tags">' + (t.breaking ? '<span class="brk-tag">Breaking</span>' : "") + (state.cat === "near" && t.ring < 3 ? '<span class="ts-place">' + (t.ring === 0 ? "📍 " : "") + esc(titles[t.ring]) + "</span>" : "") + "</div>" +
+        '<a class="ts-title" href="' + esc(t.lead.url) + '" target="_blank" rel="noopener" data-id="' + t.lead.id + '">' + mediaIcon(t.lead) + esc(t.lead.title) + "</a>" +
+        '<div class="ts-foot"><span title="' + esc(t.sources.join(", ")) + '">' + esc(t.lead.source) + (others.length ? " + " + others.length + " more" : "") + '</span> · <span data-t="' + new Date(t.newest).toISOString() + '">' + timeAgo(new Date(t.newest).toISOString()) + "</span>" +
+        '<button class="ts-all" data-jump="' + t.lead.id + '" title="Show all ' + t.reports + ' reports in the feed">' + t.reports + " reports →</button></div></article>";
+    }).join("") + "</div>";
+}
+
+// ---------- side panel (wide screens) ----------
+
+function renderRail() {
+  const rail = $("rail");
+  if (!window.matchMedia("(min-width: 1200px)").matches) { rail.innerHTML = ""; return; } // phones/laptops: ⚙ View has the same things
+  const d = state.data;
+  let h = '<section class="card rail-box"><h3>Trending · last 6h</h3>';
+  const terms = trendingTerms(12);
+  h += terms.length ? '<div class="rail-terms">' + terms.map(([t, n]) => '<button class="kw-chip" data-kw="' + esc(t) + '" title="Search for ' + esc(t) + '">' + esc(t) + ' <span class="n">' + n + "</span></button>").join("") + "</div>" : "<p>Not enough data yet.</p>";
+  h += "</section>";
+
+  const up = Object.keys(state.ratings).filter((s) => state.ratings[s] > 0).sort();
+  const down = Object.keys(state.ratings).filter((s) => state.ratings[s] < 0).length;
+  h += '<section class="card rail-box"><h3>Your sources</h3>' + (up.length
+    ? '<div class="rail-list">' + up.map((s) => '<button class="src" data-src="' + esc(s) + '" style="--h:' + srcHue(s) + '" title="Show only ' + esc(s) + '">' + esc(s) + "</button>").join("") + "</div>"
+    : "<p>👍 a source (hover over any headline) to make its reports lead their stories. They'll be listed here.</p>") +
+    (down ? '<p class="rail-note">👎 hiding ' + down + ' · <button class="link" data-manage>manage</button></p>' : "") + "</section>";
+
+  if (d) {
+    const all = d.sources, failing = all.filter((s) => !s.ok);
+    h += '<section class="card rail-box"><h3>Sources</h3><p><span class="dot ' + (failing.length ? "warn" : "ok") + '"></span> ' + (all.length - failing.length) + " of " + all.length + " working · updated " + timeAgo(d.generated_at) + " ago</p>" +
+      (failing.length ? '<ul class="rail-fail">' + failing.slice(0, 4).map((s) => "<li>" + (s.parked ? "⏸ " : "✕ ") + esc(s.name) + "</li>").join("") + "</ul>" : "") +
+      '<button class="link" data-manage>All sources and ratings →</button></section>';
+  }
+  rail.innerHTML = h;
 }
 
 // 👍 / 👎 for a source. data-rate-src (not data-src) so a click rates instead of filtering.
@@ -928,12 +1006,20 @@ function sourcesHTML() {
   return h;
 }
 
+// Most-used words in the last 6 hours' headlines (Trends panel and the side panel).
+function trendingTerms(n) {
+  const now = Date.now();
+  const counts = new Map();
+  for (const i of state.items) {
+    if (now - Date.parse(i.published) >= 6 * 3600e3 || hiddenSource(i.source)) continue;
+    for (const t of tokens(i.title)) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return [...counts].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+
 function heatHTML() {
   const now = Date.now();
-  const recent = state.items.filter((i) => now - Date.parse(i.published) < 6 * 3600e3);
-  const counts = new Map();
-  for (const i of recent) for (const t of tokens(i.title)) counts.set(t, (counts.get(t) || 0) + 1);
-  const top = [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 18);
+  const top = trendingTerms(18);
   const max = top.length ? top[0][1] : 1;
   let kw = "<div><h2>Trending terms</h2><h3>Most-used words in headlines, last 6 hours. Click one to search.</h3>";
   kw += top.length ? top.map(([t, n]) => '<div class="kw" data-kw="' + esc(t) + '"><span class="kw-label">' + esc(t) + '</span><div class="bar" style="width:' + Math.max(4, (n / max) * 100) + '%"></div><span class="num">' + n + "</span></div>").join("") : "<p>Not enough data yet.</p>";
@@ -1047,12 +1133,20 @@ function select(idx) {
 }
 
 // Show a story in the feed: clear filters, expand its group and select it.
+// Show a story in the feed, staying in the current view when it's there (opening Near me's sections if it
+// sits past their first 8), else switching to All.
 function jumpTo(id) {
   applyPending();
-  state.cat = "all"; state.source = null; state.query = ""; $("search").value = "";
-  renderCats();
+  const at = () => state.view.findIndex((s) => s.item.id === id || s.related.some((r) => r.id === id));
   render();
-  const idx = state.view.findIndex((s) => s.item.id === id || s.related.some((r) => r.id === id));
+  let idx = at();
+  if (idx < 0 && state.cat === "near") { [0, 1, 2, 3].forEach((n) => state.sectionsOpen.add(n)); render(); idx = at(); }
+  if (idx < 0) {
+    state.cat = "all"; state.source = null; state.query = ""; $("search").value = "";
+    renderCats();
+    render();
+    idx = at();
+  }
   if (idx < 0) return;
   state.expanded.add(state.view[idx].item.id);
   render();
@@ -1064,6 +1158,8 @@ function jumpTo(id) {
 function reset() {
   Object.assign(state, DEFAULTS, { source: null, query: "", panel: null, sel: -1 });
   state.expanded.clear();
+  state.topHidden = false;
+  store.set("top-hidden", false);
   state.sectionsOpen.clear();
   state.read.clear();
   for (const [k, v] of Object.entries(DEFAULTS)) store.set(k, v);
@@ -1188,7 +1284,8 @@ document.addEventListener("click", (e) => {
   else if (t.id === "clear-src") { state.source = null; renderCats(); render(); }
   else if (src) { state.source = src.dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo({ top: 0 }); }
   else if (t.dataset.toggle) toggleExpand(t.dataset.toggle);
-  else if (t.closest(".kw")) { const kw = t.closest(".kw").dataset.kw; $("search").value = kw; state.query = kw; render(); }
+  else if (t.closest("[data-top-toggle]")) { state.topHidden = !state.topHidden; store.set("top-hidden", state.topHidden); renderTop(); }
+  else if (t.closest("[data-kw]")) { const kw = t.closest("[data-kw]").dataset.kw; $("search").value = kw; state.query = kw; render(); }
   else if (t.dataset.id) { markRead(t.dataset.id); const row = t.closest(".row"); if (row && t.classList.contains("title")) row.classList.add("read"); }
 });
 
@@ -1249,6 +1346,7 @@ function tickAges() {
 setInterval(tickAges, 30000);
 setInterval(() => {
   updateFreshness();
+  renderRail(); // "updated 3m ago"
   if (state.panel === "sources") renderPanel();
   if (state.items.length) computeBreaking(state.pending || state.items); // let stale stories drop off
 }, 30000);
@@ -1258,3 +1356,7 @@ tick();
 renderAll();
 load(false).then(() => pollLive(true));
 schedule();
+
+// The side panel only exists on wide screens; redraw it when the window crosses that width.
+let railTimer;
+window.addEventListener("resize", () => { clearTimeout(railTimer); railTimer = setTimeout(renderRail, 200); });

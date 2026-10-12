@@ -97,8 +97,15 @@
         <div id="error" class="error" hidden></div>
       </div>
 
-      <section id="panel" class="card panel" hidden></section>
-      <main id="feed" class="card feed"><div class="empty">Loading headlines…</div></main>
+      <!-- Wide screens: the news in the main column, everything secondary in the side panel. -->
+      <div class="layout">
+        <div class="main">
+          <section id="panel" class="card panel" hidden></section>
+          <section id="topstories" class="top-stories" hidden aria-label="Top stories now"></section>
+          <main id="feed" class="card feed"><div class="empty">Loading headlines…</div></main>
+        </div>
+        <aside id="rail" class="rail" aria-label="Trends, your sources and source status"></aside>
+      </div>
 
       <footer class="foot">
         Headlines from public RSS feeds, Telegram channels and Bluesky accounts, collected every ~5 minutes by GitHub Actions. Social and OSINT posts (TG, BSKY) are unverified.
