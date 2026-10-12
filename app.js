@@ -542,7 +542,7 @@ function rowHTML({ item, related }, idx) {
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
   h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
-    rateHTML(item.source) + '<span class="when" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" + syndHTML(item);
+    rateHTML(item.source) + '<span class="when" data-t="' + item.published + '" data-clock title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" + syndHTML(item);
   if (related.length || item.summary) {
     const label = related.length ? (open ? "Hide " : "+") + related.length + " report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
@@ -553,7 +553,7 @@ function rowHTML({ item, related }, idx) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
     }
   }
   return h + "</article>";
@@ -573,12 +573,12 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   }
   if (open) {
     h += '<div class="c-open">';
-    h += '<div class="meta">' + srcHTML(item, "button") + rateHTML(item.source) + '<span class="when">' + timeAgo(item.published) + "</span>" + syndHTML(item) + "</div>";
+    h += '<div class="meta">' + srcHTML(item, "button") + rateHTML(item.source) + '<span class="when" data-t="' + item.published + '">' + timeAgo(item.published) + "</span>" + syndHTML(item) + "</div>";
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (state.links) h += '<div class="actions">' + videoLinks(item, related) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
     }
     h += "</div>";
   }
@@ -1052,6 +1052,17 @@ document.addEventListener("visibilitychange", () => {
 
 function tick() { $("clock").textContent = CLOCK_FMT.format(new Date()); }
 setInterval(tick, 15000);
+
+// "33m" labels age on their own: the list is only redrawn when new headlines are shown, and new
+// headlines wait behind "↑ N new" while you're scrolled down, so without this a label could sit at
+// "33m" for an hour.
+function tickAges() {
+  for (const el of document.querySelectorAll("[data-t]")) {
+    const t = el.dataset.t;
+    el.textContent = timeAgo(t) + ("clock" in el.dataset ? " · " + hhmm(t) : "");
+  }
+}
+setInterval(tickAges, 30000);
 setInterval(() => {
   updateFreshness();
   if (state.panel === "sources") renderPanel();
