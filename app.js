@@ -117,6 +117,7 @@ const state = {
   ratings: store.get("ratings", {}), // source name → 1 (👍) or -1 (👎); this browser only
   near: null, // near.json: Google News per-country searches
   sectionsOpen: new Set(), // "Near me" sections showing all their stories
+  actsOpen: null, // the row whose actions were opened with ⋯ (phones)
   theme: store.get("theme", ""),
   source: null,
   query: "",
@@ -155,7 +156,7 @@ async function load(manual) {
     if (!state.items.length) $("feed").innerHTML = '<div class="empty">No headlines yet. Press Refresh to try again.</div>';
   } finally {
     state.loading = false;
-    $("btn-fetch").textContent = "Refresh";
+    $("btn-fetch").textContent = "Refresh now";
   }
 }
 
@@ -441,7 +442,18 @@ function ringTitles() {
   return [countryName(state.country), g ? g.hood : "", g ? g.region : "", "Rest of the world"];
 }
 
-const SECTION_CAP = 60; // stories shown per Near me section before "Show all"
+const SECTION_CAP = 8; // stories shown per Near me section before "See all", so every ring fits at a glance
+
+// Time-ordered views get dividers instead of an age on every row.
+function timeBucket(iso) {
+  const t = new Date(iso), now = new Date();
+  const mins = (now - t) / 60000;
+  if (mins < 60) return "Last hour";
+  if (mins < 180) return "1–3 hours ago";
+  if (t.toDateString() === now.toDateString()) return "Earlier today";
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  return t.toDateString() === y.toDateString() ? "Yesterday" : "Older";
+}
 
 // ---------- rendering ----------
 
@@ -471,7 +483,7 @@ function render() {
     sections = [];
     rings.forEach((r, n) => {
       if (!r.length) return;
-      const open = state.sectionsOpen.has(n) || r.length <= SECTION_CAP + 10;
+      const open = state.sectionsOpen.has(n) || r.length <= SECTION_CAP + 2;
       const shown = open ? r : r.slice(0, SECTION_CAP);
       sections.push({ n, title: titles[n], start: view.length, count: r.length, more: r.length - shown.length });
       view.push(...shown);
@@ -487,13 +499,20 @@ function render() {
   } else if (sections) {
     let h = "";
     for (const sec of sections) {
-      h += '<h2 class="ring"><span>' + (sec.n === 0 ? "📍 " : "") + esc(sec.title) + '</span><span class="ring-n">' + sec.count + " stor" + (sec.count === 1 ? "y" : "ies") + "</span></h2>";
+      h += '<h2 class="ring" data-n="' + sec.n + '"><span>' + (sec.n === 0 ? "📍 " : "") + esc(sec.title) + '</span><span class="ring-n">' + sec.count + " stor" + (sec.count === 1 ? "y" : "ies") + "</span></h2>";
       for (let i = sec.start; i < sec.start + sec.count - sec.more; i++) h += rowHTML(state.view[i], i);
-      if (sec.more) h += '<button class="ring-more" data-ring="' + sec.n + '">Show ' + sec.more + " more from " + esc(sec.title) + "</button>";
+      if (sec.more) h += '<button class="ring-more" data-ring="' + sec.n + '">See all ' + sec.count + " from " + esc(sec.title) + " →</button>";
+      else if (sec.count > SECTION_CAP + 2) h += '<button class="ring-more" data-ring-close="' + sec.n + '">Show fewer from ' + esc(sec.title) + "</button>";
     }
     feed.innerHTML = h;
   } else {
-    feed.innerHTML = state.view.map((s, idx) => rowHTML(s, idx)).join("");
+    let h = "", last = "";
+    state.view.forEach((s, idx) => {
+      const b = timeBucket(s.newest || s.item.published);
+      if (b !== last) { h += '<div class="tdiv">' + b + "</div>"; last = b; }
+      h += rowHTML(s, idx);
+    });
+    feed.innerHTML = h;
   }
   renderHiddenNote(list);
   renderCatCounts();
@@ -538,16 +557,22 @@ function rowHTML({ item, related }, idx) {
   if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
   if (state.density === "compact") return compactRowHTML(item, related, idx, cls, breaking, open);
-  // Two lines: the headline, then source · time (reader's local time) · more reports · search links.
+  if (state.actsOpen === item.id) cls.push("acts-open");
+  // Two short lines: the headline, then "source · +N reports". The rest (exact time, 👍/👎, copies,
+  // search links) sits in .acts, shown on hover on a computer or after tapping ⋯ on a phone.
+  // In the time-ordered views, "Last hour / Earlier today…" dividers replace the per-row age; Near me's
+  // sections have no dividers, so its rows keep a short age.
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
-  h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
-    rateHTML(item.source) + '<span class="when" data-t="' + item.published + '" data-clock title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" + syndHTML(item);
+  h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button");
+  if (state.cat === "near") h += '<span class="age" data-t="' + item.published + '" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + "</span>";
   if (related.length || item.summary) {
     const label = related.length ? (open ? "Hide " : "+") + related.length + " report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
   }
-  if (state.links) h += videoLinks(item, related);
+  h += '<button class="dots" data-acts="' + item.id + '" aria-expanded="' + (state.actsOpen === item.id) + '" aria-label="More actions" title="Time, 👍 / 👎, search links">⋯</button>';
+  h += '<span class="acts"><span class="when" data-t="' + item.published + '" data-clock title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" +
+    rateHTML(item.source) + syndHTML(item) + (state.links ? videoLinks(item, related) : "") + "</span>";
   h += "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
@@ -736,6 +761,7 @@ function helpHTML() {
     "<div><h2>How it works</h2><p>Headlines come from about 130 public sources (news sites' RSS feeds, YouTube channels, public Telegram channels and Bluesky accounts) plus Google News searches for nearly 50 countries. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
     "<p><b>📍 Near me</b> starts with your country (from your device's time zone; change it with the 📍 menu), then its neighbourhood, its region and the rest of the world, each newest first. Countries come from the places named in each headline, or the outlet's home country.</p>" +
     "<p>When several outlets run the same wire story word for word, only the earliest is shown, marked <b>via Reuters</b> (or AP…) and <b>+N copies</b>. <b>Grouped</b> puts different reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
+    "<p>Each headline shows its source and how many reports it has. Hover over it (or tap <b>⋯</b> on a phone) for the exact time, 👍 / 👎 and search links. Layout, time range, alerts, Trends and Sources are under <b>⚙ View</b>.</p>" +
     "<p><b>👍</b> a source to make its reports lead their stories; <b>👎</b> one to hide it. Ratings stay in this browser only (no account). Manage them under Sources.</p>" +
     "<p>Posts marked <b>TG</b> (Telegram) or <b>BSKY</b> (Bluesky) come from social accounts and are unverified. Click a source's name to show only that source.</p>" +
     "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your location, ratings, theme, alerts and sound stay as they are.</p></div></div>";
@@ -972,9 +998,16 @@ $("interval").onchange = (e) => { state.interval = +e.target.value; store.set("i
 $("btn-snd").onclick = () => { state.sound = !state.sound; store.set("sound", state.sound); renderButtons(); if (state.sound) beep(); };
 $("btn-alerts").onclick = toggleAlerts;
 $("btn-video").onclick = () => { state.links = !state.links; store.set("links", state.links); renderButtons(); render(); };
-$("btn-heat").onclick = () => togglePanel("heat");
-$("btn-sources").onclick = () => togglePanel("sources");
-$("btn-help").onclick = () => togglePanel("help");
+// The ⚙ View menu: everything that isn't needed all the time.
+function setMenu(open) {
+  $("viewmenu").hidden = !open;
+  $("btn-view").setAttribute("aria-expanded", open);
+}
+$("btn-view").onclick = () => setMenu($("viewmenu").hidden);
+// Trends / Sources / Help open a panel below the bar, so the menu closes to show it.
+$("btn-heat").onclick = () => { setMenu(false); togglePanel("heat"); };
+$("btn-sources").onclick = () => { setMenu(false); togglePanel("sources"); };
+$("btn-help").onclick = () => { setMenu(false); togglePanel("help"); };
 $("view").onclick = (e) => { const b = e.target.closest("button"); if (b) setCluster(b.dataset.v === "grouped"); };
 $("density").onclick = (e) => { const b = e.target.closest("button"); if (b) setDensity(b.dataset.v); };
 $("staged").onclick = () => { applyPending(); window.scrollTo({ top: 0 }); };
@@ -996,8 +1029,18 @@ document.addEventListener("click", (e) => {
   const src = t.closest("[data-src]");
   const rateBtn = t.closest("[data-rate]");
   const ring = t.closest("[data-ring]");
-  if (rateBtn) rate(rateBtn.dataset.rateSrc, +rateBtn.dataset.rate);
+  const ringClose = t.closest("[data-ring-close]");
+  const dots = t.closest("[data-acts]");
+  if (!$("viewmenu").hidden && !t.closest(".viewmenu-wrap")) setMenu(false); // click outside closes the menu
+  if (dots) { state.actsOpen = state.actsOpen === dots.dataset.acts ? null : dots.dataset.acts; render(); }
+  else if (rateBtn) rate(rateBtn.dataset.rateSrc, +rateBtn.dataset.rate);
   else if (ring) { state.sectionsOpen.add(+ring.dataset.ring); render(); }
+  else if (ringClose) {
+    state.sectionsOpen.delete(+ringClose.dataset.ringClose);
+    render();
+    const head = [...document.querySelectorAll(".ring")].find((h) => h.dataset.n === ringClose.dataset.ringClose);
+    if (head) head.scrollIntoView({ block: "start" });
+  }
   else if (t.closest("[data-manage]")) { state.panel = "sources"; renderButtons(); renderPanel(); window.scrollTo({ top: 0 }); }
   else if (jump) jumpTo(jump.dataset.jump);
   else if (t.closest("[data-reset]")) reset();
@@ -1014,7 +1057,8 @@ document.addEventListener("keydown", (e) => {
   const inInput = e.target.tagName === "INPUT" || e.target.tagName === "SELECT";
   if (e.key === "Escape") {
     if (inInput) e.target.blur();
-    if (state.query) { state.query = ""; $("search").value = ""; render(); }
+    if (!$("viewmenu").hidden) setMenu(false);
+    else if (state.query) { state.query = ""; $("search").value = ""; render(); }
     else if (state.panel) togglePanel(state.panel);
     else if (state.source) { state.source = null; renderCats(); render(); }
     return;

@@ -32,8 +32,9 @@
       </header>
 
       <div class="toolbar" id="top">
-        <div class="controls">
-          <button class="chip reset" id="btn-reset" title="Back to the default view: Near me, last 24 hours, no search, grouped stories, everything collapsed. Keeps your location and ratings.">↺ Reset</button>
+        <!-- One slim bar: what you use all the time. Everything else lives in the ⚙ View menu. -->
+        <div class="controls mainbar">
+          <button class="chip reset" id="btn-reset" title="Start over: Near me, last 24 hours, no search, grouped stories, everything collapsed. Keeps your location and ratings. (key x)">↺</button>
           <div class="seg cats" id="cats" role="group" aria-label="Category"></div>
           <label class="place chip" title="Your location: Near me starts here, then its neighbourhood and region. Set from your device's time zone; change it here.">📍
             <select id="country" aria-label="Your location"></select>
@@ -43,40 +44,52 @@
             <input id="search" type="search" placeholder="Search headlines" autocomplete="off" spellcheck="false" aria-label="Search headlines" />
             <kbd>/</kbd>
           </label>
-        </div>
-        <div class="controls sub">
-          <div class="seg" id="view" role="group" aria-label="Layout">
-            <button data-v="grouped" title="Group reports of the same story">Grouped</button>
-            <button data-v="flat" title="Every headline on its own row">All posts</button>
+          <div class="viewmenu-wrap">
+            <button class="btn" id="btn-view" aria-haspopup="true" aria-expanded="false" aria-controls="viewmenu" title="Layout, time range, alerts, trends, sources and help">⚙ View</button>
+            <div class="menu" id="viewmenu" hidden>
+              <div class="menu-sec">
+                <span class="menu-lab">Show</span>
+                <div class="seg" id="view" role="group" aria-label="Layout">
+                  <button data-v="grouped" title="Group reports of the same story (key c)">Grouped</button>
+                  <button data-v="flat" title="Every headline on its own row (key c)">All posts</button>
+                </div>
+                <div class="seg" id="density" role="group" aria-label="Density">
+                  <button data-v="comfortable" title="Larger headlines (key d)">Comfortable</button>
+                  <button data-v="compact" title="One headline per line (key d)">Compact</button>
+                </div>
+                <select id="hours" aria-label="How far back" class="chip" title="Show headlines from this long ago">
+                  <option value="6">Last 6 hours</option>
+                  <option value="12">Last 12 hours</option>
+                  <option value="24">Last 24 hours</option>
+                  <option value="48">Last 48 hours</option>
+                </select>
+              </div>
+              <div class="menu-sec">
+                <span class="menu-lab">Each headline</span>
+                <button class="chip" id="btn-video" title="Search links (X, YouTube, Google News, Yandex Video, Bilibili) in each headline's actions, newest results first where the site allows it (key v)">🔎 Search links</button>
+              </div>
+              <div class="menu-sec">
+                <span class="menu-lab">Updates</span>
+                <button class="chip" id="btn-auto" title="Check for new headlines automatically">⟳ Auto</button>
+                <select id="interval" aria-label="Auto refresh interval" class="chip">
+                  <option value="30">every 30s</option>
+                  <option value="60">every 1m</option>
+                  <option value="120">every 2m</option>
+                  <option value="300">every 5m</option>
+                </select>
+                <button class="chip" id="btn-alerts" title="Browser notification when a story starts breaking (key a)">🔔 Alerts</button>
+                <button class="chip" id="btn-snd" title="Beep on new headlines and breaking stories">🔊 Sound</button>
+                <button class="chip" id="btn-fetch" title="Check for new headlines now (key r)">Refresh now</button>
+              </div>
+              <div class="menu-sec">
+                <span class="menu-lab">More</span>
+                <button class="chip" id="btn-heat" title="Trending terms and volume (key h)">📈 Trends</button>
+                <button class="chip" id="btn-sources" title="Every source's status, and your 👍 / 👎 ratings (key s)">📰 Sources</button>
+                <button class="chip" id="btn-help" title="Keyboard shortcuts and how it works (key ?)">? Help</button>
+              </div>
+              <div id="count" class="count menu-foot"></div>
+            </div>
           </div>
-          <div class="seg" id="density" role="group" aria-label="Density">
-            <button data-v="comfortable" title="Larger headlines with details (key d)">Comfortable</button>
-            <button data-v="compact" title="One headline per line (key d)">Compact</button>
-          </div>
-          <div class="chips">
-            <select id="hours" aria-label="How far back" class="chip" title="Show headlines from this long ago">
-              <option value="6">Last 6h</option>
-              <option value="12">Last 12h</option>
-              <option value="24">Last 24h</option>
-              <option value="48">Last 48h</option>
-            </select>
-            <button class="chip" id="btn-alerts" title="Browser notification when a story starts breaking (key a)">🔔 Alerts</button>
-            <button class="chip" id="btn-snd" title="Beep on new headlines and breaking stories">🔊 Sound</button>
-            <button class="chip" id="btn-video" title="Show search links (X, YouTube, Google News, Yandex Video, Bilibili) under each headline, newest results first where the site allows it">🔎 Search links</button>
-            <button class="chip" id="btn-auto" title="Check for new headlines automatically">⟳ Auto</button>
-            <select id="interval" aria-label="Auto refresh interval" class="chip">
-              <option value="30">every 30s</option>
-              <option value="60">every 1m</option>
-              <option value="120">every 2m</option>
-              <option value="300">every 5m</option>
-            </select>
-          </div>
-          <span class="spacer"></span>
-          <span id="count" class="count"></span>
-          <button class="btn" id="btn-fetch" title="Check for new headlines now (key r)">Refresh</button>
-          <button class="btn" id="btn-heat" title="Trending terms and volume (key h)">Trends</button>
-          <button class="btn" id="btn-sources" title="Status of every source (key s)">Sources</button>
-          <button class="btn" id="btn-help" title="Keyboard shortcuts and how it works (key ?)">?</button>
         </div>
         <div id="srcfilter" class="note" hidden></div>
         <div id="hidden-note" class="note" hidden></div>
