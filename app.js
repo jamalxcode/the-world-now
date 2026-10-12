@@ -110,7 +110,8 @@ const state = {
   cluster: store.get("cluster", DEFAULTS.cluster),
   density: store.get("density", DEFAULTS.density),
   links: store.get("links", DEFAULTS.links), // search links under each headline (new key, so the old "off" default is gone)
-  cat: store.get("cat", DEFAULTS.cat),
+  // Near me became the default in Oct 2026: show it once to people whose browser remembers another tab.
+  cat: store.get("seen-near", false) ? store.get("cat", DEFAULTS.cat) : (store.set("seen-near", true), store.set("cat", "near"), "near"),
   hours: store.get("hours", DEFAULTS.hours), // show headlines from the last N hours
   country: store.get("country", null) ?? detectCountry(), // "Near me" centre; "" = no location
   ratings: store.get("ratings", {}), // source name → 1 (👍) or -1 (👎); this browser only
