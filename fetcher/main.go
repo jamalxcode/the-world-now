@@ -415,9 +415,14 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		if id == "" {
 			id = hash(e.url)
 		}
+		if src.Aggregator && strings.EqualFold(strings.TrimSpace(e.title), name) {
+			continue // Google News sometimes lists an outlet's home page: the "headline" is just its name
+		}
 		geo := detectGeo(e.title)
-		if src.About != "" && !contains(geo, src.About) {
-			geo = append([]string{src.About}, geo...)
+		// A country search also finds local outlets' wire stories about elsewhere ("UK PM says…" in Kuwait
+		// Times): tag the search's country only when the headline names it, or names no country at all.
+		if src.About != "" && len(geo) == 0 {
+			geo = []string{src.About}
 		}
 		if len(geo) == 0 && src.Country != "" && !src.Aggregator {
 			geo = []string{src.Country}

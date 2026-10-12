@@ -33,8 +33,11 @@
 
       <div class="toolbar" id="top">
         <div class="controls">
-          <button class="chip reset" id="btn-reset" title="Back to the default view: all categories, no search, grouped stories, everything collapsed">↺ Reset</button>
+          <button class="chip reset" id="btn-reset" title="Back to the default view: Near me, last 24 hours, no search, grouped stories, everything collapsed. Keeps your location and ratings.">↺ Reset</button>
           <div class="seg cats" id="cats" role="group" aria-label="Category"></div>
+          <label class="place chip" title="Your location: Near me starts here, then its neighbourhood and region. Set from your device's time zone; change it here.">📍
+            <select id="country" aria-label="Your location"></select>
+          </label>
           <label class="search">
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" /><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
             <input id="search" type="search" placeholder="Search headlines" autocomplete="off" spellcheck="false" aria-label="Search headlines" />
@@ -51,6 +54,12 @@
             <button data-v="compact" title="One headline per line (key d)">Compact</button>
           </div>
           <div class="chips">
+            <select id="hours" aria-label="How far back" class="chip" title="Show headlines from this long ago">
+              <option value="6">Last 6h</option>
+              <option value="12">Last 12h</option>
+              <option value="24">Last 24h</option>
+              <option value="48">Last 48h</option>
+            </select>
             <button class="chip" id="btn-alerts" title="Browser notification when a story starts breaking (key a)">🔔 Alerts</button>
             <button class="chip" id="btn-snd" title="Beep on new headlines and breaking stories">🔊 Sound</button>
             <button class="chip" id="btn-video" title="Show search links (X, YouTube, Google News, Yandex Video, Bilibili) under each headline, newest results first where the site allows it">🔎 Search links</button>
@@ -70,6 +79,7 @@
           <button class="btn" id="btn-help" title="Keyboard shortcuts and how it works (key ?)">?</button>
         </div>
         <div id="srcfilter" class="note" hidden></div>
+        <div id="hidden-note" class="note" hidden></div>
         <button id="staged" class="staged" hidden></button>
         <div id="error" class="error" hidden></div>
       </div>

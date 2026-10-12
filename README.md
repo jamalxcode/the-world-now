@@ -35,7 +35,22 @@ Each job sends the body `{"ref":"main"}` and these headers: `Authorization: Bear
 
 ## Look and controls
 
-The design follows heat.sala.company: Inter, soft cards and an automatic light or dark theme (switch with the ◐ button). **Comfortable / Compact** (key `d`) switches between larger headlines with details and one headline per line. Headlines with video show 📺 and ones with audio (podcasts, voice notes) show 🔊, detected from the source's media tags, Telegram and Bluesky video posts, and video or podcast links. **🔎 Search links** (on by default, key `v`) adds X, YouTube, Google News, Yandex Video and Bilibili searches under each headline. They use a few keywords from the headline rather than the whole headline (3–4, or the 2 strongest for Bilibili, which is smaller), and ask for the newest results where the site allows it: X's Latest tab, Google News and Yandex Video sorted by date, and on YouTube, which no longer sorts by date, uploads from the last hour for busy stories (2+ sources, under 3 hours old) and from this week otherwise, because the last-hour filter finds nothing on quiet stories. Bilibili's links have no newest-first option, so it sorts by relevance. **↺ Reset** (key `x`) clears the search and filters, closes panels and goes back to the default view. It keeps your theme, alerts and sound settings.
+The design follows heat.sala.company: Inter, soft cards and an automatic light or dark theme (switch with the ◐ button). **Comfortable / Compact** (key `d`) switches between larger headlines with details and one headline per line. Headlines with video show 📺 and ones with audio (podcasts, voice notes) show 🔊, detected from the source's media tags, Telegram and Bluesky video posts, and video or podcast links. **🔎 Search links** (on by default, key `v`) adds X, YouTube, Google News, Yandex Video and Bilibili searches under each headline. They use a few keywords from the headline rather than the whole headline (3–4, or the 2 strongest for Bilibili, which is smaller), and ask for the newest results where the site allows it: X's Latest tab, Google News and Yandex Video sorted by date, and on YouTube, which no longer sorts by date, uploads from the last hour for busy stories (2+ sources, under 3 hours old) and from this week otherwise, because the last-hour filter finds nothing on quiet stories. Bilibili's links have no newest-first option, so it sorts by relevance. **↺ Reset** (key `x`) clears the search and filters, closes panels and goes back to the default view (Near me, last 24 hours). It keeps your location, ratings, theme, alerts and sound settings.
+
+## Near me
+
+**📍 Near me** (the default view) lists news in rings: the reader's country, then its neighbourhood (for Kuwait: the Gulf), its region (the Middle East) and the rest of the world, each newest first. The country comes from the device's time zone, with no permission prompt; the 📍 menu changes it (or 🌐 Anywhere). The region table is `GEO_GROUPS` in `app.js`.
+
+- The fetcher tags each headline with countries (`geo`): from the places, demonyms, capitals and big cities named in it (`geoData` in `fetcher/enrich.go`), or, when it names none, the outlet's home country (`"country"` in `sources.json`).
+- [`sources-near.json`](sources-near.json) adds Google News searches for ~50 countries, built into `near.json`. Each is fetched every 30 minutes (`every_minutes`) to stay gentle with Google; carry-forward fills the gaps. These headlines only appear in Near me. To add a country, copy a line and set `about` to its code.
+- A story sits in the ring of its headline's countries; if the headline names none, where most of its reports point.
+- The **Last 6h / 12h / 24h / 48h** menu limits every view; the default is 24 hours. The data keeps 48 hours.
+
+## Repeats, ratings and source health
+
+- **Syndicated copies**: when several outlets run the same story word for word (usually a wire story), the fetcher keeps the earliest and lists the others as **+N copies** (`also`), with **via Reuters** (`via`) when the text names the wire service. Different outlets' own reporting is kept and grouped on the page instead.
+- **👍 / 👎** next to each source: 👍 makes its report lead its stories, 👎 hides it. Ratings are stored in the reader's browser only (no accounts), so each person has their own and they don't sync between devices. **Sources → Your ratings** lists and undoes them.
+- **Set aside**: a source failing for over 24 hours is only retried every 6 hours, shown with ⏸ in Sources, and comes back on its own once it works.
 
 ## Breaking news
 
@@ -51,7 +66,7 @@ X has no free API, and its RSS mirrors (Nitter, xcancel) are blocked, so X posts
 
 ## Editing sources
 
-Edit [`sources.json`](sources.json) and push. Every entry has a `name` and a `category` (`top`, `world`, `mideast`, `osint`, `defense`, `biz`, `tech`, `hazard` or `science`), plus one of these. For a YouTube channel, the `channel` is its ID (starts with `UC`), found in the page source of the channel page as `"externalId"`; check the feed name matches, because the first ID on a page can belong to a sister channel:
+Edit [`sources.json`](sources.json) and push. Every entry has a `name` and a `category` (`top`, `world`, `mideast`, `osint`, `defense`, `biz`, `tech`, `hazard` or `science`), plus one of these, and optionally `"country"` (the outlet's home country, used for headlines that name no place). For a YouTube channel, the `channel` is its ID (starts with `UC`), found in the page source of the channel page as `"externalId"`; check the feed name matches, because the first ID on a page can belong to a sister channel:
 
 ```json
 { "name": "BBC", "category": "world", "url": "https://feeds.bbci.co.uk/news/world/rss.xml" }

@@ -3,7 +3,7 @@
 "use strict";
 
 const CATS = [
-  ["all", "All"], ["video", "📺 Videos"], ["top", "Top"], ["world", "World"], ["mideast", "Middle East"], ["osint", "OSINT"],
+  ["near", "📍 Near me"], ["all", "All"], ["video", "📺 Videos"], ["top", "Top"], ["world", "World"], ["mideast", "Middle East"], ["osint", "OSINT"],
   ["defense", "Defense"], ["biz", "Business"], ["tech", "Tech"], ["hazard", "Hazards"], ["science", "Science"],
 ];
 const STOP = new Set(("about above after again against also among amid amidst around because been before being below between both could does doing down during each from further have having here into itself just more most much near only other over said says same should some such than that their them then there these they this those through under until very were what when where which while with would your will year years week weeks today first last back news live update updates latest video watch report reports breaking urgent according officials official people told january february march april june july august september october november december monday tuesday wednesday thursday friday saturday sunday".split(" ")));
@@ -16,8 +16,74 @@ const BREAK_FRESH_MIN = 90;
 const LIVE_POLL_S = 60;
 const PAGE_START = Date.now();
 
-// What ↺ Reset returns to. Theme, alerts and sound are personal settings and stay as they are.
-const DEFAULTS = { cat: "all", cluster: true, density: "comfortable", links: true, auto: true, interval: 120 };
+// What ↺ Reset returns to. Theme, alerts, sound, your location and your 👍/👎 ratings are personal
+// settings and stay as they are.
+const DEFAULTS = { cat: "near", cluster: true, density: "comfortable", links: true, auto: true, interval: 120, hours: 24 };
+
+// "Near me" rings: your country → its neighbourhood → its wider region → everything else.
+// The fetcher tags each headline with countries (item.geo); this table says which countries are near which.
+// [neighbourhood, region, member countries]
+const GEO_GROUPS = [
+  ["Gulf", "Middle East", "KW SA AE QA BH OM IQ IR YE"],
+  ["Levant, Turkey & Egypt", "Middle East", "JO LB SY IL PS TR EG CY"],
+  ["North Africa", "Africa", "LY TN DZ MA SD SS"],
+  ["West & Central Africa", "Africa", "NG GH SN CI ML BF NE CM CD AO"],
+  ["East Africa", "Africa", "KE ET SO UG TZ RW ER DJ"],
+  ["Southern Africa", "Africa", "ZA ZW ZM MZ MG"],
+  ["Western Europe", "Europe", "GB IE FR DE NL BE CH AT"],
+  ["Northern Europe", "Europe", "SE NO DK FI IS EE LV LT"],
+  ["Southern Europe", "Europe", "ES PT IT GR MT RS HR BA XK AL"],
+  ["Eastern Europe", "Europe", "PL CZ SK HU RO BG UA BY MD RU"],
+  ["North America", "Americas", "US CA"],
+  ["Latin America", "Americas", "MX GT HN SV NI CR PA CU HT DO JM BR AR CL CO PE VE EC BO PY UY"],
+  ["South Asia", "Asia", "IN PK BD NP LK AF MV"],
+  ["East Asia", "Asia", "CN HK TW JP KR KP MN"],
+  ["Southeast Asia", "Asia", "SG MY ID PH TH VN MM KH LA"],
+  ["Central Asia & Caucasus", "Asia", "KZ UZ TM KG TJ AZ GE AM"],
+  ["Oceania", "Oceania", "AU NZ PG FJ"],
+];
+const GEO = {}; // code → { hood, region, hoodSet, regionSet }
+for (const [hood, region, list] of GEO_GROUPS) {
+  const hoodSet = new Set(list.split(" "));
+  const regionSet = new Set(GEO_GROUPS.filter((g) => g[1] === region).flatMap((g) => g[2].split(" ")));
+  for (const c of hoodSet) GEO[c] = { hood, region, hoodSet, regionSet };
+}
+const REGION_NAMES = typeof Intl.DisplayNames === "function" ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+const countryName = (c) => { try { return (REGION_NAMES && REGION_NAMES.of(c)) || c; } catch { return c; } };
+
+// The reader's country from the device's time zone (no permission prompt), else the browser language.
+const TZ_COUNTRY = {
+  Kuwait: "KW", Riyadh: "SA", Dubai: "AE", Qatar: "QA", Bahrain: "BH", Muscat: "OM", Baghdad: "IQ", Tehran: "IR", Aden: "YE",
+  Amman: "JO", Beirut: "LB", Damascus: "SY", Jerusalem: "IL", Tel_Aviv: "IL", Gaza: "PS", Hebron: "PS", Istanbul: "TR", Cairo: "EG", Nicosia: "CY", Famagusta: "CY",
+  Tripoli: "LY", Tunis: "TN", Algiers: "DZ", Casablanca: "MA", El_Aaiun: "MA", Khartoum: "SD", Juba: "SS",
+  Lagos: "NG", Accra: "GH", Dakar: "SN", Abidjan: "CI", Bamako: "ML", Ouagadougou: "BF", Niamey: "NE", Douala: "CM", Kinshasa: "CD", Lubumbashi: "CD", Luanda: "AO",
+  Nairobi: "KE", Addis_Ababa: "ET", Mogadishu: "SO", Kampala: "UG", Dar_es_Salaam: "TZ", Kigali: "RW", Asmara: "ER", Djibouti: "DJ",
+  Johannesburg: "ZA", Harare: "ZW", Lusaka: "ZM", Maputo: "MZ", Antananarivo: "MG",
+  London: "GB", Dublin: "IE", Paris: "FR", Berlin: "DE", Busingen: "DE", Amsterdam: "NL", Brussels: "BE", Zurich: "CH", Vienna: "AT",
+  Stockholm: "SE", Oslo: "NO", Copenhagen: "DK", Helsinki: "FI", Reykjavik: "IS", Tallinn: "EE", Riga: "LV", Vilnius: "LT",
+  Madrid: "ES", Ceuta: "ES", Canary: "ES", Lisbon: "PT", Azores: "PT", Madeira: "PT", Rome: "IT", Athens: "GR", Malta: "MT", Belgrade: "RS", Zagreb: "HR", Sarajevo: "BA", Tirane: "AL",
+  Warsaw: "PL", Prague: "CZ", Bratislava: "SK", Budapest: "HU", Bucharest: "RO", Sofia: "BG", Kyiv: "UA", Kiev: "UA", Simferopol: "UA", Minsk: "BY", Chisinau: "MD",
+  Moscow: "RU", Kaliningrad: "RU", Samara: "RU", Volgograd: "RU", Yekaterinburg: "RU", Omsk: "RU", Novosibirsk: "RU", Krasnoyarsk: "RU", Irkutsk: "RU", Yakutsk: "RU", Vladivostok: "RU", Magadan: "RU", Kamchatka: "RU",
+  Toronto: "CA", Vancouver: "CA", Edmonton: "CA", Winnipeg: "CA", Halifax: "CA", St_Johns: "CA", Regina: "CA", Moncton: "CA", Whitehorse: "CA", Montreal: "CA",
+  Mexico_City: "MX", Cancun: "MX", Monterrey: "MX", Tijuana: "MX", Guatemala: "GT", Tegucigalpa: "HN", El_Salvador: "SV", Managua: "NI", Costa_Rica: "CR", Panama: "PA",
+  Havana: "CU", "Port-au-Prince": "HT", Santo_Domingo: "DO", Jamaica: "JM", Sao_Paulo: "BR", Bahia: "BR", Fortaleza: "BR", Recife: "BR", Manaus: "BR", Belem: "BR",
+  Buenos_Aires: "AR", Cordoba: "AR", Santiago: "CL", Bogota: "CO", Lima: "PE", Caracas: "VE", Guayaquil: "EC", La_Paz: "BO", Asuncion: "PY", Montevideo: "UY",
+  Kolkata: "IN", Calcutta: "IN", Karachi: "PK", Dhaka: "BD", Kathmandu: "NP", Colombo: "LK", Kabul: "AF", Maldives: "MV",
+  Shanghai: "CN", Urumqi: "CN", Hong_Kong: "HK", Taipei: "TW", Tokyo: "JP", Seoul: "KR", Pyongyang: "KP", Ulaanbaatar: "MN",
+  Singapore: "SG", Kuala_Lumpur: "MY", Kuching: "MY", Jakarta: "ID", Makassar: "ID", Jayapura: "ID", Manila: "PH", Bangkok: "TH", Ho_Chi_Minh: "VN", Saigon: "VN", Yangon: "MM", Rangoon: "MM", Phnom_Penh: "KH", Vientiane: "LA",
+  Almaty: "KZ", Tashkent: "UZ", Ashgabat: "TM", Bishkek: "KG", Dushanbe: "TJ", Baku: "AZ", Tbilisi: "GE", Yerevan: "AM",
+  Sydney: "AU", Melbourne: "AU", Brisbane: "AU", Perth: "AU", Adelaide: "AU", Hobart: "AU", Darwin: "AU", Auckland: "NZ", Port_Moresby: "PG", Fiji: "FJ",
+};
+function detectCountry() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    if (/^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Juneau|Adak|Nome|Sitka|Indiana|Kentucky|North_Dakota|Menominee)|Pacific\/Honolulu|US\/)/.test(tz)) return "US";
+    const c = TZ_COUNTRY[tz.split("/").pop()];
+    if (c) return c;
+  } catch { /* no Intl time zone */ }
+  const lang = (navigator.language || "").split("-")[1];
+  return lang && GEO[lang.toUpperCase()] ? lang.toUpperCase() : "";
+}
 const THEMES = ["", "light", "dark"], THEME_LABEL = { "": "◐ Auto", light: "☀ Light", dark: "☾ Dark" };
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +111,11 @@ const state = {
   density: store.get("density", DEFAULTS.density),
   links: store.get("links", DEFAULTS.links), // search links under each headline (new key, so the old "off" default is gone)
   cat: store.get("cat", DEFAULTS.cat),
+  hours: store.get("hours", DEFAULTS.hours), // show headlines from the last N hours
+  country: store.get("country", null) ?? detectCountry(), // "Near me" centre; "" = no location
+  ratings: store.get("ratings", {}), // source name → 1 (👍) or -1 (👎); this browser only
+  near: null, // near.json: Google News per-country searches
+  sectionsOpen: new Set(), // "Near me" sections showing all their stories
   theme: store.get("theme", ""),
   source: null,
   query: "",
@@ -63,12 +134,18 @@ async function load(manual) {
   state.loading = true;
   $("btn-fetch").textContent = "Refreshing…";
   try {
-    const res = await fetch("feed.json?t=" + Date.now(), { cache: "no-store" });
+    const t = Date.now();
+    // near.json (Google News per-country searches) is optional: Near me still works from feed.json alone.
+    const nearReq = fetch("near.json?t=" + t, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const res = await fetch("feed.json?t=" + t, { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
+    const near = await nearReq;
     showError(null);
-    const changed = !state.data || state.data.generated_at !== data.generated_at;
+    const changed = !state.data || state.data.generated_at !== data.generated_at ||
+      (near && (!state.near || state.near.generated_at !== near.generated_at));
     state.data = data;
+    if (near) state.near = near;
     updateFreshness();
     if (changed) update(manual);
     if (manual) pollLive(true);
@@ -170,17 +247,27 @@ function tidyPostTitle(t) {
   return t.replace(/#(\p{L})/gu, "$1").trim();
 }
 
+const normTitle = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
 function combined() {
   const base = state.data ? state.data.items : [];
   const ids = new Set(base.map((i) => i.id));
   const urls = new Set(base.map((i) => i.url));
-  const extra = [...state.live.values()].filter((i) => !ids.has(i.id) && !urls.has(i.url));
+  const titles = new Set(base.map((i) => normTitle(i.title)));
+  const keep = (i) => {
+    const t = normTitle(i.title);
+    if (ids.has(i.id) || urls.has(i.url) || titles.has(t)) return false;
+    ids.add(i.id); urls.add(i.url); titles.add(t);
+    return true;
+  };
+  // Google News country items (category "local") only show in Near me; drop ones the main feed already has.
+  const extra = [...state.live.values(), ...(state.near ? state.near.items : [])].filter(keep);
   return extra.length ? base.concat(extra).sort((a, b) => Date.parse(b.published) - Date.parse(a.published)) : base;
 }
 
 function update(manual) {
   const next = combined();
-  computeBreaking(next);
+  computeBreaking(next.filter((i) => i.category !== "local" && !hiddenSource(i.source)));
   if (!state.items.length) { state.items = next; render(); return; }
   const shown = new Set(state.items.map((i) => i.id));
   const newCount = next.filter((i) => !shown.has(i.id)).length;
@@ -215,21 +302,37 @@ function tokens(title) {
   return new Set(title.toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)));
 }
 
+const tokenCache = new Map(); // title → tokens, so re-renders don't re-split thousands of titles
+function cachedTokens(title) {
+  let t = tokenCache.get(title);
+  if (!t) {
+    if (tokenCache.size > 20000) tokenCache.clear();
+    tokenCache.set(title, (t = [...tokens(title)]));
+  }
+  return t;
+}
+
+// Groups reports of the same story: a later headline joins an earlier one when they share 3+ keywords,
+// or 2 that make up a third of their keywords. An index from keyword to headlines means each headline
+// is only compared with the ones that share a word with it (thousands of headlines, ~50 ms).
 function clusterItems(items) {
-  const toks = items.map((i) => tokens(i.title));
-  const used = new Array(items.length).fill(false);
+  const toks = items.map((i) => cachedTokens(i.title));
+  const index = new Map();
+  toks.forEach((ts, i) => { for (const t of ts) { let list = index.get(t); if (!list) index.set(t, (list = [])); list.push(i); } });
+  const used = new Uint8Array(items.length);
+  const shared = new Map();
   const out = [];
   for (let a = 0; a < items.length; a++) {
     if (used[a]) continue;
-    used[a] = true;
+    used[a] = 1;
+    shared.clear();
+    for (const t of toks[a]) for (const b of index.get(t)) if (b > a && !used[b]) shared.set(b, (shared.get(b) || 0) + 1);
     const related = [];
-    for (let b = a + 1; b < items.length; b++) {
-      if (used[b]) continue;
-      let shared = 0;
-      for (const t of toks[b]) if (toks[a].has(t)) shared++;
-      const union = toks[a].size + toks[b].size - shared;
-      if (shared >= 3 || (shared >= 2 && union > 0 && shared / union >= 0.34)) {
-        used[b] = true;
+    for (const b of [...shared.keys()].sort((x, y) => x - y)) {
+      const n = shared.get(b);
+      const union = toks[a].length + toks[b].length - n;
+      if (n >= 3 || (n >= 2 && union > 0 && n / union >= 0.34)) {
+        used[b] = 1;
         related.push(items[b]);
       }
     }
@@ -280,28 +383,143 @@ function notifyBreaking() {
 
 // ---------- rendering ----------
 
+// ---------- ratings (this browser only) ----------
+
+const rating = (source) => state.ratings[source] || 0;
+const hiddenSource = (source) => rating(source) < 0;
+
+function rate(source, value) {
+  if (rating(source) === value) delete state.ratings[source]; else state.ratings[source] = value;
+  store.set("ratings", state.ratings);
+  computeBreaking(state.items.filter((i) => i.category !== "local" && !hiddenSource(i.source)));
+  render();
+  if (state.panel === "sources") renderPanel();
+}
+
+// A 👍 source's report leads its story: the row shows its headline, the others go under "+N reports".
+// The row keeps its place in time (the story's newest report).
+function preferFavourites(view) {
+  for (const s of view) {
+    if (rating(s.item.source) > 0 || !s.related.length) continue;
+    const fav = s.related.find((r) => rating(r.source) > 0);
+    if (fav) {
+      s.related = [s.item, ...s.related.filter((r) => r !== fav)];
+      s.newest = s.item.published;
+      s.item = fav;
+    }
+  }
+  return view;
+}
+
+// ---------- near me ----------
+
+// 0 = your country, 1 = its neighbourhood, 2 = its region, 3 = elsewhere (or no country known).
+function ringOf(geo) {
+  const me = state.country;
+  if (!me || !geo || !geo.length) return 3;
+  if (geo.includes(me)) return 0;
+  const g = GEO[me];
+  if (!g) return 3;
+  if (geo.some((c) => g.hoodSet.has(c))) return 1;
+  if (geo.some((c) => g.regionSet.has(c))) return 2;
+  return 3;
+}
+
+// Where a story belongs: its headline's countries; if the headline names none, where most of its
+// reports point (one Kuwaiti outlet's take on a Saudi story doesn't make it Kuwaiti news).
+function storyRing(s) {
+  if (s.item.geo && s.item.geo.length) return ringOf(s.item.geo);
+  const votes = [0, 0, 0, 0];
+  for (const r of s.related) if (r.geo && r.geo.length) votes[ringOf(r.geo)]++;
+  const best = Math.max(...votes);
+  return best ? votes.indexOf(best) : 3;
+}
+
+function ringTitles() {
+  const g = GEO[state.country];
+  return [countryName(state.country), g ? g.hood : "", g ? g.region : "", "Rest of the world"];
+}
+
+const SECTION_CAP = 60; // stories shown per Near me section before "Show all"
+
+// ---------- rendering ----------
+
 function filtered() {
   const q = state.query.trim().toLowerCase();
+  const since = Date.now() - state.hours * 3600e3;
   return state.items.filter((i) =>
-    (state.cat === "all" || (state.cat === "video" ? i.media === "video" : i.category === state.cat)) &&
+    Date.parse(i.published) >= since &&
+    !hiddenSource(i.source) &&
+    (state.cat === "near" ? true
+      : i.category === "local" ? false
+      : state.cat === "all" || (state.cat === "video" ? i.media === "video" : i.category === state.cat)) &&
     (!state.source || i.source === state.source) &&
     (!q || i.title.toLowerCase().includes(q) || i.source.toLowerCase().includes(q) || (i.summary || "").toLowerCase().includes(q)));
 }
 
 function render() {
   const list = filtered();
-  state.view = state.cluster ? clusterItems(list) : list.map((item) => ({ item, related: [] }));
+  let view = preferFavourites(state.cluster ? clusterItems(list) : list.map((item) => ({ item, related: [] })));
+  let sections = null;
+  if (state.cat === "near" && state.country) {
+    // Split into rings; within each ring stories stay newest first.
+    const rings = [[], [], [], []];
+    for (const s of view) rings[storyRing(s)].push(s);
+    const titles = ringTitles();
+    view = [];
+    sections = [];
+    rings.forEach((r, n) => {
+      if (!r.length) return;
+      const open = state.sectionsOpen.has(n) || r.length <= SECTION_CAP + 10;
+      const shown = open ? r : r.slice(0, SECTION_CAP);
+      sections.push({ n, title: titles[n], start: view.length, count: r.length, more: r.length - shown.length });
+      view.push(...shown);
+    });
+  }
+  state.view = view;
   if (state.sel >= state.view.length) state.sel = state.view.length - 1;
-  $("count").textContent = state.cluster ? state.view.length + " stories · " + list.length + " reports" : list.length + " headlines";
+  $("count").textContent = state.cluster ? list.length + " reports · " + (sections ? sections.reduce((a, s) => a + s.count, 0) : view.length) + " stories" : list.length + " headlines";
 
   const feed = $("feed");
   if (!state.view.length) {
     feed.innerHTML = '<div class="empty">' + (state.items.length ? 'Nothing matches these filters. <button class="chip reset" data-reset>↺ Reset</button>' : "No headlines yet. Press Refresh to try again.") + "</div>";
+  } else if (sections) {
+    let h = "";
+    for (const sec of sections) {
+      h += '<h2 class="ring"><span>' + (sec.n === 0 ? "📍 " : "") + esc(sec.title) + '</span><span class="ring-n">' + sec.count + " stor" + (sec.count === 1 ? "y" : "ies") + "</span></h2>";
+      for (let i = sec.start; i < sec.start + sec.count - sec.more; i++) h += rowHTML(state.view[i], i);
+      if (sec.more) h += '<button class="ring-more" data-ring="' + sec.n + '">Show ' + sec.more + " more from " + esc(sec.title) + "</button>";
+    }
+    feed.innerHTML = h;
   } else {
     feed.innerHTML = state.view.map((s, idx) => rowHTML(s, idx)).join("");
   }
+  renderHiddenNote(list);
   renderCatCounts();
   if (state.panel === "heat") renderPanel();
+}
+
+function renderHiddenNote() {
+  const hidden = Object.keys(state.ratings).filter((s) => state.ratings[s] < 0);
+  const el = $("hidden-note");
+  el.hidden = !hidden.length;
+  el.innerHTML = hidden.length ? "👎 Hiding " + hidden.length + " source" + (hidden.length > 1 ? "s" : "") + ": " + hidden.slice(0, 4).map(esc).join(", ") + (hidden.length > 4 ? "…" : "") +
+    ' <button class="chip" data-manage>Manage</button>' : "";
+}
+
+// 👍 / 👎 for a source. data-rate-src (not data-src) so a click rates instead of filtering.
+function rateHTML(source) {
+  const r = rating(source);
+  return '<span class="rate"><button class="' + (r > 0 ? "on" : "") + '" data-rate="1" data-rate-src="' + esc(source) + '" title="' + (r > 0 ? "Remove 👍 from " : "👍 Prefer ") + esc(source) + (r > 0 ? "" : ": its reports lead their stories") + '" aria-pressed="' + (r > 0) + '">👍</button>' +
+    '<button class="' + (r < 0 ? "on" : "") + '" data-rate="-1" data-rate-src="' + esc(source) + '" title="' + (r < 0 ? "Show " + esc(source) + " again" : "👎 Hide " + esc(source) + " (undo under Sources)") + '" aria-pressed="' + (r < 0) + '">👎</button></span>';
+}
+
+// "via Reuters" for wire copy; "+N copies" when other outlets ran the same story word for word.
+function syndHTML(item) {
+  let h = "";
+  if (item.via) h += '<span class="via" title="This story comes from ' + esc(item.via) + '">via ' + esc(item.via) + "</span>";
+  if (item.also && item.also.length) h += '<span class="via" title="Also ran word for word by: ' + esc(item.also.join(", ")) + '">+' + item.also.length + " cop" + (item.also.length > 1 ? "ies" : "y") + "</span>";
+  return h;
 }
 
 function srcHTML(item, tag) {
@@ -323,7 +541,7 @@ function rowHTML({ item, related }, idx) {
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
   h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button") +
-    '<span class="when" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>";
+    rateHTML(item.source) + '<span class="when" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" + syndHTML(item);
   if (related.length || item.summary) {
     const label = related.length ? (open ? "Hide " : "+") + related.length + " report" + (related.length > 1 ? "s" : "") : open ? "Less" : "More";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '">' + label + "</button>";
@@ -347,13 +565,14 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   h += '<span class="c-src">' + srcHTML(item, "button") + "</span>";
   h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
     (breaking ? '<span class="brk-tag">Breaking</span> ' : "") + mediaIcon(item) + esc(item.title) + "</a>";
-  if (related.length || item.summary || state.links) {
+  { // always there: details hold 👍/👎 too
     const label = related.length ? "+" + related.length : open ? "−" : "…";
-    const tip = related.length ? related.length + " more report" + (related.length > 1 ? "s" : "") : "Details";
+    const tip = related.length ? related.length + " more report" + (related.length > 1 ? "s" : "") : "Details, 👍 / 👎";
     h += '<button class="more" data-toggle="' + item.id + '" aria-expanded="' + open + '" title="' + tip + '">' + label + "</button>";
   }
   if (open) {
     h += '<div class="c-open">';
+    h += '<div class="meta">' + srcHTML(item, "button") + rateHTML(item.source) + '<span class="when">' + timeAgo(item.published) + "</span>" + syndHTML(item) + "</div>";
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (state.links) h += '<div class="actions">' + videoLinks(item, related) + "</div>";
     if (related.length) {
@@ -453,11 +672,28 @@ function renderCats() {
 
 function renderCatCounts() {
   const counts = {};
-  for (const i of state.items) { counts[i.category] = (counts[i.category] || 0) + 1; if (i.media === "video") counts.video = (counts.video || 0) + 1; }
+  const since = Date.now() - state.hours * 3600e3;
+  for (const i of state.items) {
+    if (Date.parse(i.published) < since || hiddenSource(i.source)) continue;
+    if (state.country && ringOf(i.geo) === 0) counts.near = (counts.near || 0) + 1; // your country's count
+    if (i.category === "local") continue;
+    counts[i.category] = (counts[i.category] || 0) + 1;
+    if (i.media === "video") counts.video = (counts.video || 0) + 1;
+  }
   document.querySelectorAll("#cats button").forEach((b) => {
     const k = b.dataset.cat;
-    b.querySelector(".n").textContent = k === "all" ? "" : counts[k] || 0;
+    b.querySelector(".n").textContent = k === "all" || (k === "near" && !state.country) ? "" : counts[k] || 0;
   });
+}
+
+function renderPlace() {
+  const sel = $("country");
+  if (!sel.options.length) {
+    const codes = Object.keys(GEO).sort((a, b) => countryName(a).localeCompare(countryName(b)));
+    sel.innerHTML = '<option value="">🌐 Anywhere</option>' + codes.map((c) => '<option value="' + c + '">' + esc(countryName(c)) + "</option>").join("");
+  }
+  sel.value = state.country || "";
+  $("hours").value = String(state.hours);
 }
 
 function renderButtons() {
@@ -477,6 +713,7 @@ function renderButtons() {
 }
 
 function renderAll() {
+  renderPlace();
   renderButtons();
   renderCats();
   renderPanel();
@@ -495,22 +732,39 @@ function renderPanel() {
 function helpHTML() {
   const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["d", "Comfortable / compact"], ["v", "Search links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
   return '<div class="panel-grid"><div><h2>Keyboard shortcuts</h2>' + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") + "</div>" +
-    "<div><h2>How it works</h2><p>Headlines come from about 95 public sources: news sites' RSS feeds, public Telegram channels and public Bluesky accounts. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
-    "<p><b>Grouped</b> puts reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
+    "<div><h2>How it works</h2><p>Headlines come from about 130 public sources (news sites' RSS feeds, YouTube channels, public Telegram channels and Bluesky accounts) plus Google News searches for nearly 50 countries. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
+    "<p><b>📍 Near me</b> starts with your country (from your device's time zone; change it with the 📍 menu), then its neighbourhood, its region and the rest of the world, each newest first. Countries come from the places named in each headline, or the outlet's home country.</p>" +
+    "<p>When several outlets run the same wire story word for word, only the earliest is shown, marked <b>via Reuters</b> (or AP…) and <b>+N copies</b>. <b>Grouped</b> puts different reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
+    "<p><b>👍</b> a source to make its reports lead their stories; <b>👎</b> one to hide it. Ratings stay in this browser only (no account). Manage them under Sources.</p>" +
     "<p>Posts marked <b>TG</b> (Telegram) or <b>BSKY</b> (Bluesky) come from social accounts and are unverified. Click a source's name to show only that source.</p>" +
-    "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your theme, alerts and sound settings stay as they are.</p></div></div>";
+    "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your location, ratings, theme, alerts and sound stay as they are.</p></div></div>";
 }
 
 function sourcesHTML() {
   const d = state.data;
   if (!d) return "<h2>Sources</h2><p>No data yet.</p>";
-  const rank = (s) => (!s.ok ? 0 : s.count === 0 ? 1 : 2);
-  const rows = [...d.sources].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  const failing = d.sources.filter((s) => !s.ok).length, quiet = d.sources.filter((s) => s.ok && !s.count).length;
-  return "<h2>Sources · " + (d.sources_total - failing) + " of " + d.sources_total + " working" + (quiet ? " (" + quiet + " quiet)" : "") + ' <span class="count">· updated ' + timeAgo(d.generated_at) + " ago</span></h2>" +
-    '<div class="src-list">' + rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "q-c") + '" title="' + (!s.ok ? "failing" : s.count ? "working" : "quiet") + '">' + (!s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
+  // Your ratings first, including outlets that only appear through Google News.
+  const rated = Object.keys(state.ratings).sort((a, b) => state.ratings[b] - state.ratings[a] || a.localeCompare(b));
+  let h = "<h2>Your ratings</h2>" + (rated.length
+    ? '<div class="src-list">' + rated.map((name) => '<div class="src-row rated"><span>' + (state.ratings[name] > 0 ? "👍" : "👎") + "</span><span>" + esc(name) + "</span>" + rateHTML(name) + "</div>").join("") + "</div>"
+    : "<p>None yet. 👍 a source to make its reports lead their stories, 👎 to hide it. Ratings stay in this browser only.</p>");
+  // Each name once (several feeds can share one, like "NYT"): worst status first.
+  const byName = new Map();
+  for (const s of d.sources) {
+    const cur = byName.get(s.name);
+    if (!cur) byName.set(s.name, { ...s });
+    else { cur.count += s.count; if (!s.ok) { cur.ok = false; cur.error = s.error; cur.parked = cur.parked || s.parked; } }
+  }
+  const all = [...byName.values()];
+  const rank = (s) => (s.parked ? 0 : !s.ok ? 1 : s.count === 0 ? 2 : 3);
+  const rows = all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const failing = all.filter((s) => !s.ok).length, quiet = all.filter((s) => s.ok && !s.count).length, parked = all.filter((s) => s.parked).length;
+  h += '<h2 style="margin-top:18px">Sources · ' + (all.length - failing) + " of " + all.length + " working" + (quiet ? " (" + quiet + " quiet)" : "") + (parked ? " · " + parked + " set aside" : "") + ' <span class="count">· updated ' + timeAgo(d.generated_at) + " ago</span></h2>" +
+    (parked ? "<p>Sources failing for over a day are <b>set aside</b>: checked every 6 hours instead of every 5 minutes, and back automatically once they work.</p>" : "") +
+    '<div class="src-list">' + rows.map((s) => '<div class="src-row"><span class="' + (!s.ok ? "bad-c" : s.count ? "ok-c" : "q-c") + '" title="' + (s.parked ? "set aside" : !s.ok ? "failing" : s.count ? "working" : "quiet") + '">' + (s.parked ? "⏸" : !s.ok ? "✕" : s.count ? "●" : "○") + "</span><span>" + esc(s.name) +
       (s.type ? ' <span class="plat">' + ({ telegram: "TG", bluesky: "BSKY", youtube: "YT" }[s.type] || s.type) + "</span>" : "") +
-      '</span><span class="count">' + esc(catLabel(s.category)) + '</span><span class="num">' + s.count + "</span>" + (s.error ? '<span class="err">' + esc(s.error) + "</span>" : "") + "</div>").join("") + "</div>";
+      "</span>" + rateHTML(s.name) + '<span class="num">' + s.count + "</span>" + (s.error ? '<span class="err">' + esc((s.parked ? "set aside: " : "") + s.error) + "</span>" : "") + "</div>").join("") + "</div>";
+  return h;
 }
 
 function heatHTML() {
@@ -649,6 +903,7 @@ function jumpTo(id) {
 function reset() {
   Object.assign(state, DEFAULTS, { source: null, query: "", panel: null, sel: -1 });
   state.expanded.clear();
+  state.sectionsOpen.clear();
   state.read.clear();
   for (const [k, v] of Object.entries(DEFAULTS)) store.set(k, v);
   store.set("read", []);
@@ -723,13 +978,27 @@ $("view").onclick = (e) => { const b = e.target.closest("button"); if (b) setClu
 $("density").onclick = (e) => { const b = e.target.closest("button"); if (b) setDensity(b.dataset.v); };
 $("staged").onclick = () => { applyPending(); window.scrollTo({ top: 0 }); };
 $("search").oninput = (e) => { state.query = e.target.value; state.sel = -1; render(); };
+$("country").onchange = (e) => {
+  state.country = e.target.value;
+  store.set("country", state.country);
+  state.sectionsOpen.clear();
+  if (state.country && state.cat !== "near") { state.cat = "near"; store.set("cat", "near"); renderCats(); }
+  state.sel = -1;
+  render();
+};
+$("hours").onchange = (e) => { state.hours = +e.target.value; store.set("hours", state.hours); state.sel = -1; render(); };
 
 document.addEventListener("click", (e) => {
   const t = e.target;
   const jump = t.closest("[data-jump]");
   const cat = t.closest("[data-cat]");
   const src = t.closest("[data-src]");
-  if (jump) jumpTo(jump.dataset.jump);
+  const rateBtn = t.closest("[data-rate]");
+  const ring = t.closest("[data-ring]");
+  if (rateBtn) rate(rateBtn.dataset.rateSrc, +rateBtn.dataset.rate);
+  else if (ring) { state.sectionsOpen.add(+ring.dataset.ring); render(); }
+  else if (t.closest("[data-manage]")) { state.panel = "sources"; renderButtons(); renderPanel(); window.scrollTo({ top: 0 }); }
+  else if (jump) jumpTo(jump.dataset.jump);
   else if (t.closest("[data-reset]")) reset();
   else if (cat) { state.cat = cat.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); }
   else if (t.id === "clear-src") { state.source = null; renderCats(); render(); }

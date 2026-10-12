@@ -41,7 +41,7 @@ DZ:Algeria|Algerian|Algiers
 MA:Morocco|Moroccan|Rabat|Casablanca
 SD:Sudan|Sudanese|Khartoum|Darfur
 SS:South Sudan|South Sudanese|Juba
-US:America|American|Americans|United States|Washington|White House|Pentagon|New York|California|Texas|Florida|Chicago|Los Angeles|San Francisco|Seattle|Boston|Miami|Atlanta|Houston|Dallas|Philadelphia|Detroit|Las Vegas|San Diego|Wall Street|Capitol Hill|Silicon Valley
+US:America|American|Americans|United States|Lebanon County|Washington|White House|Pentagon|New York|California|Texas|Florida|Chicago|Los Angeles|San Francisco|Seattle|Boston|Miami|Atlanta|Houston|Dallas|Philadelphia|Detroit|Las Vegas|San Diego|Wall Street|Capitol Hill|Silicon Valley
 CA:Canada|Canadian|Canadians|Ottawa|Toronto|Vancouver|Montreal|Quebec|Alberta
 MX:Mexico|Mexican|Mexicans|Mexico City
 GB:Britain|British|United Kingdom|England|Scotland|Scottish|Wales|Welsh|Northern Ireland|London|Manchester|Downing Street|Westminster|Brexit
