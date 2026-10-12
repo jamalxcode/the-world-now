@@ -43,6 +43,9 @@ jobs:
           # Arabic, Russian and Ukrainian sources for the Meridian map (jamalxcode/globe) only. If this fails,
           # the main feed above still publishes.
           go run ./fetcher -sources sources-local.json -out _site/local.json -carry https://news.sala.company/local.json || echo "local.json skipped"
+          # Google News per-country searches for the page's "Near me" view (each country every 30 min).
+          # If this fails, the page shows Near me from feed.json alone.
+          go run ./fetcher -sources sources-near.json -out _site/near.json -carry https://news.sala.company/near.json || echo "near.json skipped"
 
       # Browsers may reuse app.js and style.css for 10 minutes, so right after a release a page could mix
       # new HTML with old scripts. Tag both addresses with the commit so each release loads its own files.

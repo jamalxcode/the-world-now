@@ -36,6 +36,14 @@ type Source struct {
 	Handle     string `json:"handle,omitempty"`  // bluesky: account handle
 	Category   string `json:"category"`
 	Aggregator bool   `json:"aggregator,omitempty"` // items name their own outlet in <source>
+	// Country (ISO code) the outlet is based in: used for headlines that name no place ("Ministry
+	// announces new traffic rules" from Times Kuwait is Kuwaiti news).
+	Country string `json:"country,omitempty"`
+	// About (ISO code): the feed is about this country (a Google News country search), so every item gets it.
+	About string `json:"about,omitempty"`
+	// EveryMinutes > 0 fetches the source at most that often; between fetches its items come from
+	// carry-forward. Used to stay gentle with Google News.
+	EveryMinutes int `json:"every_minutes,omitempty"`
 }
 
 type Config struct {
@@ -57,6 +65,12 @@ type Item struct {
 	Summary   string `json:"summary,omitempty"`
 	Social    bool   `json:"social,omitempty"`
 	Media     string `json:"media,omitempty"` // "video" or "audio"
+	// Geo: countries the headline is about (ISO codes), from place names in it, else the outlet's country.
+	Geo []string `json:"geo,omitempty"`
+	// Via: the wire service the story came from ("DUBAI (Reuters) - …"), when not the outlet itself.
+	Via string `json:"via,omitempty"`
+	// Also: outlets that ran a near-identical copy (folded into this, the earliest).
+	Also []string `json:"also,omitempty"`
 
 	t time.Time
 }
@@ -76,6 +90,12 @@ type SourceStatus struct {
 	Count    int    `json:"count"`
 	Error    string `json:"error,omitempty"`
 	MS       int64  `json:"ms"`
+	// Key identifies the source across builds; LastTry is the last fetch attempt; FailingSince is set
+	// while it keeps failing; Parked means it has failed for over a day and is only retried every 6 hours.
+	Key          string `json:"key,omitempty"`
+	LastTry      string `json:"last_try,omitempty"`
+	FailingSince string `json:"failing_since,omitempty"`
+	Parked       bool   `json:"parked,omitempty"`
 }
 
 // LiveSource is a Bluesky account the browser may poll directly between builds.
@@ -130,11 +150,36 @@ func main() {
 		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
 	}}
 
+	// The previous build (if -carry is given) supplies both its headlines and each source's history.
+	var prev *Output
+	prevStatus := map[string]SourceStatus{}
+	if *carryURL != "" {
+		if p, err := loadPrevious(client, *carryURL); err != nil {
+			log.Printf("previous build unavailable: %v", err)
+		} else {
+			prev = p
+			for _, st := range p.Sources {
+				if st.Key != "" {
+					prevStatus[st.Key] = st
+				}
+			}
+		}
+	}
+
 	statuses := make([]SourceStatus, len(cfg.Sources))
 	results := make([][]Item, len(cfg.Sources))
 	sem := make(chan struct{}, 12)
 	var wg sync.WaitGroup
 	for i, src := range cfg.Sources {
+		key := sourceKey(src)
+		ps, hadPrev := prevStatus[key]
+		fetch, parked := due(src, ps, hadPrev, now)
+		if !fetch {
+			// Not due yet (or parked between retries): keep its last status; its headlines are carried forward.
+			ps.Name, ps.Category, ps.Type, ps.Key, ps.Parked = src.Name, src.Category, src.Type, key, parked
+			statuses[i] = ps
+			continue
+		}
 		wg.Add(1)
 		go func(i int, src Source) {
 			defer wg.Done()
@@ -142,9 +187,13 @@ func main() {
 			defer func() { <-sem }()
 			start := time.Now()
 			items, err := fetchSource(client, src, cutoff, now, cfg.PerSourceLimit, exclude)
-			st := SourceStatus{Name: src.Name, Category: src.Category, Type: src.Type, MS: time.Since(start).Milliseconds()}
+			st := SourceStatus{Name: src.Name, Category: src.Category, Type: src.Type, MS: time.Since(start).Milliseconds(),
+				Key: key, LastTry: now.Format(time.RFC3339)}
 			if err != nil {
 				st.Error = err.Error()
+				st.FailingSince = firstNonEmpty(ps.FailingSince, now.Format(time.RFC3339))
+				failing, _ := time.Parse(time.RFC3339, st.FailingSince)
+				st.Parked = now.Sub(failing) > parkAfter
 			} else {
 				// Reachable and parseable counts as OK even if nothing is new.
 				st.OK, st.Count = true, len(items)
@@ -176,16 +225,32 @@ func main() {
 	}
 	// Most feeds list only their latest ~15 stories, so a story drops out long before it is 48 hours old.
 	// Keep what the previous build already had, so the whole max_age_hours window stays filled.
-	if *carryURL != "" {
-		carried, err := carryForward(client, *carryURL, cfg, cutoff, exclude, seenURL, seenTitle)
-		if err != nil {
-			log.Printf("carry-forward skipped: %v", err)
-		} else {
-			log.Printf("carried %d items from the previous build", len(carried))
-			all = append(all, carried...)
-		}
+	if prev != nil {
+		carried := carryForward(prev, cutoff, exclude, seenURL, seenTitle)
+		log.Printf("carried %d items from the previous build", len(carried))
+		all = append(all, carried...)
 	}
 	sort.SliceStable(all, func(a, b int) bool { return all[a].t.After(all[b].t) })
+
+	// Countries for items that have none yet (carried from builds before geo tagging existed),
+	// then fold syndicated copies into the earliest.
+	homeOf := map[string]string{}
+	for _, src := range cfg.Sources {
+		if src.Country != "" && !src.Aggregator {
+			homeOf[src.Name] = src.Country
+		}
+	}
+	for i := range all {
+		if all[i].Geo == nil {
+			all[i].Geo = detectGeo(all[i].Title)
+			if len(all[i].Geo) == 0 && homeOf[all[i].Source] != "" {
+				all[i].Geo = []string{homeOf[all[i].Source]}
+			}
+		}
+	}
+	before := len(all)
+	all = foldSyndicated(all)
+	log.Printf("folded %d syndicated copies", before-len(all))
 	if len(all) > cfg.MaxItems {
 		all = all[:cfg.MaxItems]
 	}
@@ -232,19 +297,7 @@ func main() {
 // carryForward returns the previous build's items that are still inside the age window, pass the exclude
 // patterns, and aren't already in this build (by URL or title). It marks what it returns in seenURL/seenTitle.
 // Items of a source removed from sources.json age out within max_age_hours.
-func carryForward(client *http.Client, feedURL string, cfg Config, cutoff time.Time, exclude []*regexp.Regexp, seenURL, seenTitle map[string]bool) ([]Item, error) {
-	sep := "?"
-	if strings.Contains(feedURL, "?") {
-		sep = "&"
-	}
-	body, err := get(client, feedURL+sep+"carry="+fmt.Sprint(time.Now().Unix()), "application/json")
-	if err != nil {
-		return nil, err
-	}
-	var prev Output
-	if err := json.Unmarshal(body, &prev); err != nil {
-		return nil, fmt.Errorf("parse previous feed: %w", err)
-	}
+func carryForward(prev *Output, cutoff time.Time, exclude []*regexp.Regexp, seenURL, seenTitle map[string]bool) []Item {
 	var out []Item
 	for _, it := range prev.Items {
 		t, err := time.Parse(time.RFC3339, it.Published)
@@ -266,7 +319,24 @@ func carryForward(client *http.Client, feedURL string, cfg Config, cutoff time.T
 		it.t = t
 		out = append(out, it)
 	}
-	return out, nil
+	return out
+}
+
+// loadPrevious reads the previously published build (feed.json), cache-busted.
+func loadPrevious(client *http.Client, feedURL string) (*Output, error) {
+	sep := "?"
+	if strings.Contains(feedURL, "?") {
+		sep = "&"
+	}
+	body, err := get(client, feedURL+sep+"carry="+fmt.Sprint(time.Now().Unix()), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	var prev Output
+	if err := json.Unmarshal(body, &prev); err != nil {
+		return nil, fmt.Errorf("parse previous feed: %w", err)
+	}
+	return &prev, nil
 }
 
 func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit int, exclude []*regexp.Regexp) ([]Item, error) {
@@ -345,6 +415,16 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		if id == "" {
 			id = hash(e.url)
 		}
+		geo := detectGeo(e.title)
+		if src.About != "" && !contains(geo, src.About) {
+			geo = append([]string{src.About}, geo...)
+		}
+		if len(geo) == 0 && src.Country != "" && !src.Aggregator {
+			geo = []string{src.Country}
+		}
+		if geo == nil {
+			geo = []string{} // "looked, found none": stops later builds re-checking carried items
+		}
 		items = append(items, Item{
 			ID:        id,
 			Title:     e.title,
@@ -355,6 +435,8 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 			Summary:   e.summary,
 			Social:    social,
 			Media:     detectMedia(e.media, e.url, e.title),
+			Geo:       geo,
+			Via:       detectVia(e.summary, name),
 			t:         e.t,
 		})
 		if len(items) >= limit {
