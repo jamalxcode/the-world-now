@@ -118,6 +118,7 @@ const state = {
   near: null, // near.json: Google News per-country searches
   sectionsOpen: new Set(), // "Near me" sections showing all their stories
   actsOpen: null, // the row whose actions were opened with ⋯ (phones)
+  editTerms: null, // the story whose search words are being chosen (✎)
   theme: store.get("theme", ""),
   source: null,
   query: "",
@@ -300,8 +301,9 @@ function schedule() {
 
 // ---------- clustering & breaking ----------
 
+// cleanHeadline drops labels like "| WION Shorts": shared by unrelated videos, they would group them as one story.
 function tokens(title) {
-  return new Set(title.toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)));
+  return new Set(cleanHeadline(title).toLowerCase().replace(/[’']s\b/g, "").split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w)));
 }
 
 const tokenCache = new Map(); // title → tokens, so re-renders don't re-split thousands of titles
@@ -557,7 +559,7 @@ function rowHTML({ item, related }, idx) {
   if (breaking) cls.push("brk");
   const open = state.expanded.has(item.id);
   if (state.density === "compact") return compactRowHTML(item, related, idx, cls, breaking, open);
-  if (state.actsOpen === item.id) cls.push("acts-open");
+  if (state.actsOpen === item.id || state.editTerms === item.id) cls.push("acts-open"); // ✎ open: keep it showing
   // Two short lines: the headline, then "source · +N reports". The rest (exact time, 👍/👎, copies,
   // search links) sits in .acts, shown on hover on a computer or after tapping ⋯ on a phone.
   // In the time-ordered views, "Last hour / Earlier today…" dividers replace the per-row age; Near me's
@@ -611,75 +613,207 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
 }
 
 
-// Search links use a few keywords, not the whole headline: a full headline is so literal
-// that it often finds nothing. Each link asks for the newest results where the site allows it.
-// The number is how many keywords each site gets: Bilibili is much smaller, so on a fresh story
-// 3 words mostly match nothing or old videos, while the 2 strongest ("Nobel Prize") find something.
-// YouTube no longer sorts by date (even its "Recently uploaded" chip ranks by relevance), so the link
-// picks an upload-date filter: "last hour" puts live streams and minutes-old uploads first on a hot story
-// but finds nothing on a quiet one, so quiet or older stories get "this week" instead.
-const YT_HOUR = "EgIIAQ%253D%253D", YT_WEEK = "EgIIAw%253D%253D";
-const SEARCH_LINKS = [
-  ["X", 4, (q) => "https://x.com/search?q=" + q + "&f=live"], // Latest tab (X needs you to be signed in)
-  ["YouTube", 4, (q, hot) => "https://www.youtube.com/results?search_query=" + q + "&sp=" + (hot ? YT_HOUR : YT_WEEK)],
-  ["Google News", 4, (q) => "https://www.google.com/search?q=" + q + "&tbm=nws&tbs=sbd:1"], // news, sorted by date
-  ["Yandex Video", 4, (q) => "https://yandex.com/video/search?text=" + q + "&how=tm"], // newest first
-  ["Bilibili", 2, (q) => "https://www.bilibili.tv/en/search-result?q=" + q], // relevance only: no newest-first option in its links
-];
-// Filler words and weak verbs that make a search too literal.
+// ---------- search terms ----------
+// The search links under each headline need words that pin the story down without being so literal
+// that they find nothing. Five ideas work together:
+//  1. Story consensus: words that several of a story's reports use describe the event; one outlet's
+//     own phrasing doesn't. Units are scored by how many of the story's sources use them.
+//  2. Rarity: a word in hundreds of today's headlines ("Trump", "war") narrows little; one in a few
+//     ("Woodford", "Mandeb") pins the story down. Scored by inverse document frequency over the feed.
+//  3. Cleaning: headline labels ("From Breakingviews -", "COMMENTARY:", "LIVE:", "| Firstpost") go;
+//     names stay whole ("Bab el-Mandeb", "South Korea"); spellings are unified (Türkiye → Turkey).
+//  4. Each site gets its own syntax and number of words (below).
+//  5. You can change the words: ✎ in a headline's actions shows them as chips to switch on or off.
+
+// Filler words and weak verbs that never make a good search term.
 const SEARCH_STOP = new Set(("the and for are was were has had have his her its our not but all any can out who how why what when where new one two " +
   "says said say tell tells told after over amid amidst report reports video videos watch live latest update updates breaking exclusive analysis opinion " +
   "will would could should than then them they this that these those with from into onto about against more most " +
   "plan plans set sets get gets make makes take takes hit hits seek seeks warn warns urge urges call calls vow vows eye eyes face faces look looks " +
   "launch launches secure secures weigh weighs announce announced announces speak speaks hold holds held reach reaching reached see sees come comes " +
-  "move moves back backs push pushes probe probes split splits").split(" "));
-
-// Keywords for search: the names in the headline (capitalised words) topped up with its first ordinary
-// keywords, in headline order: 3 words, or 4 when there are 3 names.
-// "Italy regulator probes AI music startup Suno over terms of service" → "Italy regulator Suno".
-// With max = 2 it keeps the two strongest: the first two names if there are two, else the first two picks.
-function searchQuery(title, max = 4) {
-  const seen = new Set();
-  const words = title.replace(/@\w+/g, " ").replace(/[’']s\b/g, "").replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/)
-    .filter((w) => {
-      const k = w.toLowerCase();
-      if (w.length < 3 || !/^\p{L}/u.test(w) || STOP.has(k) || SEARCH_STOP.has(k) || seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  if (!words.length) return encodeURIComponent(title.split(/\s+/).slice(0, max).join(" "));
-  const isName = (w) => /^\p{Lu}/u.test(w);
-  const names = words.filter(isName);
-  let pick;
-  if (names.length >= words.length * 0.7) pick = words.slice(0, 3); // Title Case Headline: capitals tell us nothing
-  else {
-    const keep = new Set(names.slice(0, 3));
-    const target = keep.size === 3 ? 4 : 3;
-    for (const w of words) if (keep.size < target && !isName(w)) keep.add(w);
-    pick = words.filter((w) => keep.has(w));
-  }
-  if (pick.length > max) {
-    // The headline's first word is capitalised anyway; common openers ("Former", "Green") aren't names.
-    const opener = (w) => w === words[0] && WEAK_OPENERS.has(w.toLowerCase());
-    const strong = pick.filter((w) => isName(w) && !opener(w));
-    if (strong.length >= max) pick = strong.slice(0, max);
-    else if (strong.length) {
-      const extra = pick.filter((w) => !strong.includes(w) && !opener(w)).slice(0, max - strong.length);
-      pick = pick.filter((w) => strong.includes(w) || extra.includes(w));
-    } else pick = pick.slice(0, max);
-  }
-  return encodeURIComponent(pick.join(" "));
-}
+  "move moves back backs push pushes probe probes split splits buy buys sell sells worth million millions billion billions percent per cent " +
+  "put puts faced faces goes going gets got give gives given show shows shown keep keeps kept " +
+  "people time times days year years week weeks month months first last next amid during while still also just only very much many " +
+  "three four five six seven eight nine ten dozens hundreds thousands " +
+  "here there now today tonight morning evening news story stories photo photos images pictures shorts").split(" "));
+// Titles in front of a name ("Rep. Ilhan Omar"): dropped so the name itself is the search term.
+const HONORIFICS = new Set("rep sen gov pres mr mrs ms dr st lt gen col sgt capt prof sheikh hon".split(" "));
 const WEAK_OPENERS = new Set("former green red orange yellow amber new top big major senior acting interim early late deadly fatal huge massive second third final key".split(" "));
 
-// A story is "hot" when 2+ sources report it (or it's breaking) and it's under 3 hours old.
+// Headline labels and show names that aren't part of the story.
+const LABEL_RES = [
+  /^\s*from\s+[\p{L} ]{2,30}?\s+-\s+/iu, // "From Breakingviews - "
+  /^\s*(breakingviews|commentary|analysis|opinion|explainer|exclusive|live|watch|video|breaking|factbox|instant view|insight|editorial|update\s*\d*)\s*[-:–—|]+\s*/i,
+];
+function cleanHeadline(title) {
+  let t = title;
+  for (let i = 0; i < 4; i++) for (const re of LABEL_RES) t = t.replace(re, "");
+  const pipe = t.split(/\s+\|\s+/); // "Story | Firstpost", "Story | AJ #shorts"
+  if (pipe.length > 1 && pipe[0].length >= 20) t = pipe[0];
+  return t.replace(/#[\p{L}\p{N}_]+/gu, " ").replace(/\s+/g, " ").trim() || title;
+}
+
+// One spelling per name, so different outlets' versions count as the same word.
+const SYNONYMS = { "türkiye": "turkey", "turkiye": "turkey", "houthis": "houthi", "kiev": "kyiv", "u.s": "us", "usa": "us", "u.k": "uk" };
+// X understands OR, so it gets both spellings.
+const X_VARIANTS = { turkey: "(Turkey OR Türkiye)", kyiv: "(Kyiv OR Kiev)", houthi: "(Houthi OR Houthis)" };
+const CONNECTORS = new Set("al el de du da di bin ibn van von der la le".split(" "));
+const WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}’'.\-]*/gu;
+const isCap = (w) => /^\p{Lu}/u.test(w);
+const termKey = (w) => { const k = w.toLowerCase().replace(/[’']s$/, "").replace(/\.$/, ""); return SYNONYMS[k] || k; };
+
+// A headline's candidate terms: single words, plus two-word names ("South Korea", "Bab el-Mandeb").
+function headlineUnits(title) {
+  const ws = (cleanHeadline(title).match(WORD_RE) || [])
+    .map((w) => w.replace(/[’']s$/i, "").replace(/^[’'.\-]+|[’'.\-]+$/g, "")) // "View'" → "View", "Omar's" → "Omar"
+    .filter((w) => w && !HONORIFICS.has(w.toLowerCase()));
+  const titleCase = ws.length >= 4 && ws.filter(isCap).length / ws.length >= 0.7; // capitals mean nothing there
+  const good = (w) => {
+    const k = termKey(w);
+    return !STOP.has(k) && !SEARCH_STOP.has(k) && !/^\d/.test(k) && (k.length >= 3 || (k.length === 2 && w === w.toUpperCase()));
+  };
+  const out = [];
+  ws.forEach((w, i) => {
+    if (good(w)) out.push({ key: termKey(w), text: w, words: [termKey(w)], name: isCap(w) && !titleCase && !(i === 0 && WEAK_OPENERS.has(w.toLowerCase())), pos: i });
+  });
+  if (!titleCase) {
+    for (let i = 0; i < ws.length - 1; i++) {
+      let a = ws[i], b = ws[i + 1], j = i + 1;
+      if (CONNECTORS.has(b.toLowerCase()) && i + 2 < ws.length) { b = b + " " + ws[i + 2]; j = i + 2; } // "Bab el Mandeb"
+      const last = ws[j];
+      if (!isCap(a) || !isCap(last) || (i === 0 && WEAK_OPENERS.has(a.toLowerCase()))) continue;
+      if (j + 1 < ws.length && isCap(ws[j + 1])) continue; // part of a longer run: too literal to quote
+      if (i > 0 && isCap(ws[i - 1]) && !(i === 1 && WEAK_OPENERS.has(ws[0].toLowerCase()))) continue;
+      const parts = (a + " " + b).split(" ");
+      if (!parts.every((p) => CONNECTORS.has(p.toLowerCase()) || good(p))) continue;
+      out.push({ key: parts.map(termKey).join(" "), text: a + " " + b, words: parts.filter((p) => !CONNECTORS.has(p.toLowerCase())).map(termKey), name: true, pos: i });
+    }
+  }
+  return out;
+}
+
+// How many of today's headlines use each word (for rarity), rebuilt when the feed changes.
+let dfCache = { items: null, map: new Map(), n: 1 };
+function docFreq() {
+  if (dfCache.items === state.items) return dfCache;
+  const map = new Map();
+  for (const it of state.items) for (const k of new Set((cleanHeadline(it.title).match(WORD_RE) || []).map(termKey))) map.set(k, (map.get(k) || 0) + 1);
+  termCache.clear(); // scores depend on these counts
+  return (dfCache = { items: state.items, map, n: state.items.length || 1 });
+}
+
+// All of a story's candidate terms, best first.
+const termCache = new Map();
+function storyTerms(item, related) {
+  const reports = [item, ...related].slice(0, 30);
+  const df = docFreq(); // first, so a changed feed clears the cache
+  const cacheKey = item.id + "|" + reports.length;
+  if (termCache.has(cacheKey)) return termCache.get(cacheKey);
+  const sources = new Set(reports.map((r) => r.source)).size;
+  const stats = new Map();
+  reports.forEach((r, ri) => {
+    for (const u of headlineUnits(r.title)) {
+      let s = stats.get(u.key);
+      if (!s) stats.set(u.key, (s = { ...u, srcs: new Set(), pos: ri === 0 ? u.pos : 1000 + u.pos }));
+      s.srcs.add(r.source);
+      if (ri === 0 && s.pos >= 1000) { s.pos = u.pos; s.text = u.text; }
+      s.name = s.name || u.name;
+    }
+  });
+  for (const s of stats.values()) {
+    const d = Math.min(...s.words.map((w) => df.map.get(w) || 1));
+    const rarity = Math.log((df.n + 1) / (d + 1)) + 0.1;
+    const shared = sources > 1 ? s.srcs.size / sources : 1; // 1: consensus across the story's sources
+    s.score = rarity * (0.4 + shared) * (s.name ? 1.25 : 1) * (s.words.length > 1 ? 1.3 : 1);
+  }
+  const ranked = [...stats.values()].sort((a, b) => b.score - a.score);
+  if (termCache.size > 5000) termCache.clear();
+  termCache.set(cacheKey, ranked);
+  return ranked;
+}
+
+// The best terms within a word budget, in headline order; a name blocks its own words.
+// must: a term that has to be in (the country the headline names), placed first.
+function pickTerms(ranked, budget, must) {
+  const chosen = [], used = new Set();
+  let n = 0;
+  for (const u of must ? [must, ...ranked.filter((x) => x !== must)] : ranked) {
+    if (u.words.some((w) => used.has(w)) || n + u.words.length > budget) continue;
+    chosen.push(u);
+    u.words.forEach((w) => used.add(w));
+    n += u.words.length;
+    if (n >= budget) break;
+  }
+  return chosen.sort((a, b) => a.pos - b.pos);
+}
+
+// 4. Per site: how many words, and its own syntax. Each link asks for the newest results the site allows.
+// YouTube no longer sorts by date (even its "Recently uploaded" chip ranks by relevance), so its link uses an
+// upload-date filter: "last hour" for a busy fresh story (live streams and minutes-old uploads first), else
+// "this week", because the last-hour filter finds nothing on a quiet story.
+const YT_HOUR = "EgIIAQ%253D%253D", YT_WEEK = "EgIIAw%253D%253D";
+const SEARCH_SITES = [
+  { name: "X", words: 4, quote: true, or: true, url: (q) => "https://x.com/search?q=" + encodeURIComponent(q + " -filter:replies") + "&f=live" },
+  { name: "YouTube", words: 3, url: (q, ctx) => "https://www.youtube.com/results?search_query=" + encodeURIComponent(q) + "&sp=" + (ctx.hot ? YT_HOUR : YT_WEEK),
+    tip: (ctx) => (ctx.hot ? "uploaded in the last hour (busy story)" : "uploaded this week") },
+  { name: "Google News", words: 4, quote: true, url: (q, ctx) => "https://www.google.com/search?q=" + encodeURIComponent(q) + "&tbm=nws&tbs=" + (ctx.ageH < 20 ? "qdr:d," : "qdr:w,") + "sbd:1",
+    tip: (ctx) => (ctx.ageH < 20 ? "past 24 hours" : "past week") + ", newest first" },
+  { name: "Yandex Video", words: 4, url: (q) => "https://yandex.com/video/search?text=" + encodeURIComponent(q) + "&how=tm", tip: () => "newest first" },
+  { name: "Bilibili", words: 2, url: (q) => "https://www.bilibili.tv/en/search-result?q=" + encodeURIComponent(q), tip: () => "by relevance (no date sort)" },
+];
+function siteQuery(units, site) {
+  return units.map((u) => (site.or && X_VARIANTS[u.key]) || (site.quote && u.text.includes(" ") ? '"' + u.text + '"' : u.text)).join(" ");
+}
+
+// 5. Your own picks per story, from the ✎ chips: story id → Set of term keys.
+const termEdits = new Map();
+
+// The country a headline names is the search's anchor, even when it's common today ("Saudi" is in
+// hundreds of headlines, but "Strikes Put Economy Pressure" without it finds anything). Only when the
+// headline itself says it (item.geo can also come from the outlet's home country).
+function anchorTerm(item, ranked) {
+  for (const code of item.geo || []) {
+    const name = countryName(code).toLowerCase();
+    const cand = ranked.filter((u) => u.pos < 1000 && (name === u.key || name.startsWith(u.key + " ") || (u.key.length >= 4 && (u.key.startsWith(name) || name.startsWith(u.key)))));
+    if (cand.length) return cand.sort((a, b) => b.words.length - a.words.length || b.score - a.score)[0];
+  }
+  return null;
+}
+
 function videoLinks(item, related = []) {
-  const age = Date.now() - Date.parse(item.published);
-  const hot = age < 3 * 3600e3 && (related.length >= 1 || state.breakingIds.has(item.id));
-  return '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_LINKS.map(([name, max, url]) => {
-    const tip = name === "YouTube" ? ' title="' + (hot ? "Uploaded in the last hour (busy story)" : "Uploaded this week") + '"' : "";
-    return '<a href="' + esc(url(searchQuery(item.title, max), hot)) + '" target="_blank" rel="noopener"' + tip + ">" + name + "</a>";
-  }).join("") + "</span>";
+  const ageH = (Date.now() - Date.parse(item.published)) / 3600e3;
+  const ctx = { ageH, hot: ageH < 3 && (related.length >= 1 || state.breakingIds.has(item.id)) };
+  const ranked = storyTerms(item, related);
+  if (!ranked.length) return "";
+  const edited = termEdits.get(item.id);
+  const mine = edited ? ranked.filter((u) => edited.has(u.key)).sort((a, b) => a.pos - b.pos) : null;
+  const must = anchorTerm(item, ranked);
+  let h = '<span class="vids"><span class="vlab">Search:</span>' + SEARCH_SITES.map((site) => {
+    const units = mine && mine.length ? mine : pickTerms(ranked, site.words, must);
+    const q = siteQuery(units, site);
+    return '<a href="' + esc(site.url(q, ctx)) + '" target="_blank" rel="noopener" title="' + esc(site.name + ": " + q + (site.tip ? " · " + site.tip(ctx) : "")) + '">' + site.name + "</a>";
+  }).join("");
+  const open = state.editTerms === item.id;
+  h += '<button class="term-edit" data-edit-terms="' + item.id + '" aria-expanded="' + open + '" title="Choose the search words">✎</button></span>';
+  if (open) {
+    const on = new Set((mine && mine.length ? mine : pickTerms(ranked, 4, must)).map((u) => u.key));
+    const onWords = new Set(ranked.filter((u) => on.has(u.key)).flatMap((u) => u.words));
+    const offer = ranked.filter((u) => !on.has(u.key) && !u.words.some((w) => onWords.has(w))).slice(0, 6); // not "+ Saudi" next to "Saudi Arabia"
+    const chip = (u, isOn) => '<button class="term' + (isOn ? " on" : "") + '" data-term="' + esc(u.key) + '" data-term-id="' + item.id + '" aria-pressed="' + isOn + '">' + (isOn ? "" : "+ ") + esc(u.text) + "</button>";
+    h += '<span class="terms"><span class="vlab">Words:</span>' + ranked.filter((u) => on.has(u.key)).sort((a, b) => a.pos - b.pos).map((u) => chip(u, true)).join("") +
+      offer.map((u) => chip(u, false)).join("") + (edited ? '<button class="term reset-terms" data-term-reset="' + item.id + '">↺ auto</button>' : "") + "</span>";
+  }
+  return h;
+}
+
+function toggleTerm(id, key) {
+  const story = state.view.find((s) => s.item.id === id);
+  if (!story) return;
+  const ranked = storyTerms(story.item, story.related);
+  const cur = termEdits.get(id) || new Set(pickTerms(ranked, 4, anchorTerm(story.item, ranked)).map((u) => u.key));
+  if (cur.has(key)) cur.delete(key); else cur.add(key);
+  termEdits.set(id, cur);
+  render();
 }
 
 function renderStaged(n) {
@@ -1032,7 +1166,13 @@ document.addEventListener("click", (e) => {
   const ringClose = t.closest("[data-ring-close]");
   const dots = t.closest("[data-acts]");
   if (!$("viewmenu").hidden && !t.closest(".viewmenu-wrap")) setMenu(false); // click outside closes the menu
-  if (dots) { state.actsOpen = state.actsOpen === dots.dataset.acts ? null : dots.dataset.acts; render(); }
+  const editBtn = t.closest("[data-edit-terms]");
+  const termBtn = t.closest("[data-term]");
+  const termReset = t.closest("[data-term-reset]");
+  if (editBtn) { state.editTerms = state.editTerms === editBtn.dataset.editTerms ? null : editBtn.dataset.editTerms; render(); }
+  else if (termBtn) toggleTerm(termBtn.dataset.termId, termBtn.dataset.term);
+  else if (termReset) { termEdits.delete(termReset.dataset.termReset); render(); }
+  else if (dots) { state.actsOpen = state.actsOpen === dots.dataset.acts ? null : dots.dataset.acts; render(); }
   else if (rateBtn) rate(rateBtn.dataset.rateSrc, +rateBtn.dataset.rate);
   else if (ring) { state.sectionsOpen.add(+ring.dataset.ring); render(); }
   else if (ringClose) {

@@ -164,6 +164,15 @@ select.chip { padding-right: 4px; }
 .vids a { font-size: 11.5px; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; }
 .vids a:hover { color: var(--blue); }
 .vids .vlab { font-size: 11.5px; color: var(--muted); align-self: center; margin-right: 2px; }
+/* ✎: choose the search words */
+.term-edit { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 0 7px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.term-edit:hover, .term-edit[aria-expanded="true"] { color: var(--ink); background: var(--neutral); }
+.terms { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; flex-basis: 100%; padding-top: 4px; }
+.term { border: 1px dashed var(--axis); background: none; border-radius: 999px; padding: 0 8px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.term.on { border: 1px solid var(--blue); background: color-mix(in oklab, var(--blue) 12%, var(--surface)); color: var(--ink); }
+.term.on::after { content: " ✕"; font-size: 10px; color: var(--muted); }
+.term:hover { color: var(--ink); }
+.reset-terms { border-style: solid; }
 .summary { color: var(--ink-2); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
 .related { margin-top: 8px; border-left: 2px solid var(--grid); padding-left: 12px; display: grid; gap: 6px; }
 .related .r { font-size: 13.5px; line-height: 1.4; }
@@ -225,7 +234,7 @@ select.chip { padding-right: 4px; }
 .dots[aria-expanded="true"] { color: var(--ink); }
 @media (hover: hover) {
   .row:not(.c) .acts { visibility: hidden; }
-  .row:hover .acts, .row:focus-within .acts, .row.sel .acts { visibility: visible; }
+  .row:hover .acts, .row:focus-within .acts, .row.sel .acts, .row.acts-open .acts { visibility: visible; }
 }
 @media (hover: none) {
   .row:not(.c) .dots { display: inline-block; margin-left: auto; }
