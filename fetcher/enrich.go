@@ -171,9 +171,41 @@ var (
 	geoMaxWords = 3
 )
 
+// Arabic names for the countries Arabic headlines name most (with the article "ال" where Arabic uses it).
+// "عمان" is left out: without vowel marks it is both Oman and Amman.
+const geoDataArabic = `
+KW:الكويت|كويتي|الكويتي|الكويتية
+SA:السعودية|السعودي|الرياض|جدة|مكة
+AE:الإمارات|الإماراتي|الإماراتية|دبي|أبوظبي|ابوظبي|الشارقة
+QA:قطر|القطري|القطرية|الدوحة
+BH:البحرين|البحريني|البحرينية|المنامة
+OM:مسقط|العماني|العمانية
+IQ:العراق|العراقي|العراقية|بغداد|البصرة|أربيل
+IR:إيران|ايران|الإيراني|الإيرانية|طهران
+YE:اليمن|اليمني|اليمنية|الحوثي|الحوثيين|الحوثيون|صنعاء|عدن
+JO:الأردن|الاردن|الأردني|الأردنية
+LB:لبنان|اللبناني|اللبنانية|بيروت
+SY:سوريا|سورية|السوري|السورية|دمشق|حلب
+IL:إسرائيل|اسرائيل|الإسرائيلي|الإسرائيلية|تل أبيب
+PS:فلسطين|الفلسطيني|الفلسطينية|الفلسطينيين|غزة|الضفة|حماس|رفح
+TR:تركيا|التركي|التركية|أنقرة|إسطنبول
+EG:مصر|المصري|المصرية|القاهرة
+SD:السودان|السوداني|الخرطوم
+LY:ليبيا|الليبي|طرابلس
+US:أمريكا|أميركا|الأمريكي|الأمريكية|الأميركي|الأميركية|واشنطن
+RU:روسيا|الروسي|الروسية|موسكو|الكرملين
+UA:أوكرانيا|الأوكراني|الأوكرانية|كييف
+CN:الصين|الصيني|الصينية|بكين
+GB:بريطانيا|البريطاني|البريطانية|لندن
+FR:فرنسا|الفرنسي|الفرنسية|باريس
+DE:ألمانيا|الألماني|الألمانية|برلين
+IN:الهند|الهندي|الهندية
+PK:باكستان|الباكستاني|الباكستانية
+`
+
 func init() {
 	geoNames = map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(geoData), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(geoData)+"\n"+strings.TrimSpace(geoDataArabic), "\n") {
 		code, names, ok := strings.Cut(strings.TrimSpace(line), ":")
 		if !ok {
 			continue
@@ -224,6 +256,14 @@ func detectGeo(title string) []string {
 			if c, ok := geoNames[strings.ToLower(strings.Join(span, " "))]; ok {
 				add(c)
 				matched = n
+			} else if n == 1 {
+				for _, v := range arabicForms(span[0]) { // "بالكويت" → "الكويت"
+					if c, ok := geoNames[v]; ok {
+						add(c)
+						matched = 1
+						break
+					}
+				}
 			}
 		}
 		if matched == 0 {
@@ -238,11 +278,38 @@ func capitalised(words []string) bool {
 	for _, w := range words {
 		r := []rune(w)
 		// "of", "es", "de" may sit inside a name ("Dar es Salaam", "Rio de Janeiro").
-		if len(r) == 0 || (!unicode.IsUpper(r[0]) && len(r) > 3) {
+		if len(r) == 0 || (!nameStart(r[0]) && len(r) > 3) {
 			return false
 		}
 	}
-	return unicode.IsUpper([]rune(words[0])[0])
+	return nameStart([]rune(words[0])[0])
+}
+
+// A capital letter, or a letter from a script without capitals (Arabic), where any word may be a name.
+func nameStart(r rune) bool {
+	return unicode.IsUpper(r) || (unicode.IsLetter(r) && !unicode.IsLower(r))
+}
+
+// Arabic attaches "and", "in", "to", "for" to the word: والكويت, بالكويت, للكويت, فالعراق.
+func arabicForms(w string) []string {
+	if !unicode.Is(unicode.Arabic, []rune(w + " ")[0]) {
+		return nil
+	}
+	var out []string
+	for _, p := range []string{"وال", "بال", "فال", "كال"} {
+		if strings.HasPrefix(w, p) {
+			out = append(out, "ال"+strings.TrimPrefix(w, p))
+		}
+	}
+	if strings.HasPrefix(w, "لل") {
+		out = append(out, "ال"+strings.TrimPrefix(w, "لل"))
+	}
+	for _, p := range []string{"و", "ب", "ل", "ف"} {
+		if strings.HasPrefix(w, p) {
+			out = append(out, strings.TrimPrefix(w, p))
+		}
+	}
+	return out
 }
 
 // ---------- wire services ----------

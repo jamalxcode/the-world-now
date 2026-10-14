@@ -52,7 +52,22 @@ type Config struct {
 	PerSourceLimit int      `json:"per_source_limit"`
 	MinOKSources   int      `json:"min_ok_sources"`
 	Exclude        []string `json:"exclude_title_patterns"`
+	// Outlets never shown (content mills, press-release wires, air-quality pages), matched on the name an
+	// aggregator gives them, case-insensitively. Headlines with fewer words than MinTitleWords are dropped
+	// too ("Morning recap").
+	BlockedOutlets []string `json:"blocked_outlets"`
+	MinTitleWords  int      `json:"min_title_words"`
 	Sources        []Source `json:"sources"`
+}
+
+// Set once in main from the config; used while fetching and carrying forward.
+var (
+	blockedOutlets = map[string]bool{}
+	minTitleWords  int
+)
+
+func junk(source, title string) bool {
+	return blockedOutlets[strings.ToLower(strings.TrimSpace(source))] || (minTitleWords > 0 && len(strings.Fields(title)) < minTitleWords)
 }
 
 type Item struct {
@@ -118,6 +133,10 @@ func main() {
 	srcPath := flag.String("sources", "sources.json", "sources config")
 	outPath := flag.String("out", "feed.json", "output file")
 	carryURL := flag.String("carry", "", "URL of the previously published feed.json; its headlines under max_age_hours are kept")
+	out24 := flag.String("out24", "", "also write only the last 24 hours here (what the page loads first)")
+	outNew := flag.String("outnew", "", "also write only the last -newmin minutes here (the page's quick refresh)")
+	newMin := flag.Int("newmin", 75, "minutes of headlines in -outnew")
+	breakingOut := flag.String("breaking", "", "also write the stories breaking now here (for the app's background alerts)")
 	flag.Parse()
 
 	raw, err := os.ReadFile(*srcPath)
@@ -141,6 +160,10 @@ func main() {
 	for _, p := range cfg.Exclude {
 		exclude = append(exclude, regexp.MustCompile(p))
 	}
+	for _, o := range cfg.BlockedOutlets {
+		blockedOutlets[strings.ToLower(o)] = true
+	}
+	minTitleWords = cfg.MinTitleWords
 
 	now := time.Now().UTC()
 	cutoff := now.Add(-time.Duration(cfg.MaxAgeHours) * time.Hour)
@@ -285,11 +308,43 @@ func main() {
 		Live:        live,
 		Items:       all,
 	}
-	buf, err := json.Marshal(out)
+	writeJSON(*outPath, out)
+	// Smaller copies for the page: the last 24 hours (loaded first) and the last ~hour (quick refresh).
+	// feed.json itself keeps the whole window for other readers (the Meridian map).
+	if *out24 != "" {
+		writeJSON(*out24, since(out, now.Add(-24*time.Hour)))
+	}
+	if *outNew != "" {
+		writeJSON(*outNew, since(out, now.Add(-time.Duration(*newMin)*time.Minute)))
+	}
+	if *breakingOut != "" {
+		established := map[string]bool{}
+		for _, src := range cfg.Sources {
+			if src.Type != "telegram" && src.Type != "bluesky" && !src.Aggregator {
+				established[src.Name] = true
+			}
+		}
+		writeJSON(*breakingOut, breakingNow(all, established, now))
+	}
+}
+
+func since(o Output, t time.Time) Output {
+	var items []Item
+	for _, it := range o.Items {
+		if !it.t.Before(t) {
+			items = append(items, it)
+		}
+	}
+	o.Items = items
+	return o
+}
+
+func writeJSON(path string, v any) {
+	buf, err := json.Marshal(v)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile(*outPath, buf, 0o644); err != nil {
+	if err := os.WriteFile(path, buf, 0o644); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -304,7 +359,7 @@ func carryForward(prev *Output, cutoff time.Time, exclude []*regexp.Regexp, seen
 		if err != nil || t.Before(cutoff) {
 			continue
 		}
-		skip := false
+		skip := junk(it.Source, it.Title) // a newly blocked outlet or pattern also clears what was carried
 		for _, re := range exclude {
 			if re.MatchString(it.Title) {
 				skip = true
@@ -417,6 +472,9 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		}
 		if src.Aggregator && strings.EqualFold(strings.TrimSpace(e.title), name) {
 			continue // Google News sometimes lists an outlet's home page: the "headline" is just its name
+		}
+		if junk(name, e.title) {
+			continue
 		}
 		geo := detectGeo(e.title)
 		// A country search also finds local outlets' wire stories about elsewhere ("UK PM says…" in Kuwait

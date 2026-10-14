@@ -1,0 +1,32 @@
+{
+  "_note": "Arabic sources for the page's العربية / Both language setting (built into ar.json). Google News Arabic searches cover Kuwaiti papers without feeds of their own (Al Rai, Al Qabas, Al Anba, KUNA). about = the country every item of that search is tagged with when the headline names none.",
+  "max_age_hours": 24,
+  "max_items": 2500,
+  "per_source_limit": 40,
+  "min_ok_sources": 4,
+  "min_title_words": 3,
+  "exclude_title_patterns": ["(?i)\\bnewsletter\\b", "(?i)^sign up (to|for)\\b", "حالة الطقس", "درجات الحرارة اليوم", "أسعار الذهب اليوم", "سعر الدولار اليوم", "مواقيت الصلاة", "الأبراج"],
+  "blocked_outlets": ["IQAir", "IndexBox"],
+  "sources": [
+    { "name": "Google News · الكويت", "category": "local", "aggregator": true, "about": "KW", "every_minutes": 15, "url": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D9%83%D9%88%D9%8A%D8%AA+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · Kuwait top (Arabic)", "category": "top", "aggregator": true, "every_minutes": 15, "url": "https://news.google.com/rss?hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · السعودية", "category": "local", "aggregator": true, "about": "SA", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A%D8%A9+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · الإمارات", "category": "local", "aggregator": true, "about": "AE", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D8%A5%D9%85%D8%A7%D8%B1%D8%A7%D8%AA+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · قطر", "category": "local", "aggregator": true, "about": "QA", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%D9%82%D8%B7%D8%B1+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · البحرين", "category": "local", "aggregator": true, "about": "BH", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D8%A8%D8%AD%D8%B1%D9%8A%D9%86+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · سلطنة عمان", "category": "local", "aggregator": true, "about": "OM", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%22%D8%B3%D9%84%D8%B7%D9%86%D8%A9+%D8%B9%D9%85%D8%A7%D9%86%22+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+    { "name": "Google News · العراق", "category": "local", "aggregator": true, "about": "IQ", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D8%B9%D8%B1%D8%A7%D9%82+when:1d&hl=ar&gl=KW&ceid=KW:ar" },
+
+    { "name": "BBC عربي", "category": "world", "url": "https://feeds.bbci.co.uk/arabic/rss.xml" },
+    { "name": "الجزيرة", "category": "mideast", "url": "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9" },
+    { "name": "سكاي نيوز عربية", "category": "mideast", "country": "AE", "url": "https://www.skynewsarabia.com/rss.xml" },
+    { "name": "الشرق الأوسط", "category": "mideast", "url": "https://aawsat.com/feed" },
+    { "name": "CNN بالعربية", "category": "world", "url": "https://arabic.cnn.com/rss" },
+    { "name": "فرانس 24", "category": "world", "url": "https://www.france24.com/ar/rss" },
+    { "name": "DW عربية", "category": "world", "url": "https://rss.dw.com/xml/rss-ar-all" },
+    { "name": "يورونيوز", "category": "world", "url": "https://arabic.euronews.com/rss" },
+    { "name": "العربي الجديد", "category": "mideast", "url": "https://www.alaraby.co.uk/rss" },
+    { "name": "الإمارات اليوم", "category": "mideast", "country": "AE", "url": "https://www.emaratalyoum.com/1.533091?ot=ot.AjaxPageLayout" },
+    { "name": "RT Arabic", "category": "world", "url": "https://arabic.rt.com/rss/" }
+  ]
+}

@@ -39,19 +39,31 @@ jobs:
           mkdir -p _site
           # -carry keeps the previous build's headlines until they're 48 h old: most feeds only list their
           # latest ~15 stories, which would leave the second day nearly empty.
-          go run ./fetcher -sources sources.json -out _site/feed.json -carry https://news.sala.company/feed.json
+          # Build the fetcher once; the four feeds below reuse it.
+          go build -o fetch ./fetcher
+          # feed.json keeps 48 hours (the Meridian map reads it). The page loads feed-24h.json first,
+          # then only feed-new.json (the last ~75 minutes) on refresh. breaking.json feeds the app's
+          # background alerts.
+          ./fetch -sources sources.json -out _site/feed.json -carry https://news.sala.company/feed.json \
+            -out24 _site/feed-24h.json -outnew _site/feed-new.json -breaking _site/breaking.json
           # Arabic, Russian and Ukrainian sources for the Meridian map (jamalxcode/globe) only. If this fails,
           # the main feed above still publishes.
-          go run ./fetcher -sources sources-local.json -out _site/local.json -carry https://news.sala.company/local.json || echo "local.json skipped"
+          ./fetch -sources sources-local.json -out _site/local.json -carry https://news.sala.company/local.json || echo "local.json skipped"
           # Google News per-country searches for the page's "Near me" view (each country every 30 min).
           # If this fails, the page shows Near me from feed.json alone.
-          go run ./fetcher -sources sources-near.json -out _site/near.json -carry https://news.sala.company/near.json || echo "near.json skipped"
+          ./fetch -sources sources-near.json -out _site/near.json -outnew _site/near-new.json -carry https://news.sala.company/near.json || echo "near.json skipped"
+          # Arabic headlines for the page's العربية / Both setting.
+          ./fetch -sources sources-ar.json -out _site/ar.json -outnew _site/ar-new.json -carry https://news.sala.company/ar.json || echo "ar.json skipped"
+          # version.json: what the page polls (a few bytes) to learn whether anything changed.
+          v() { [ -f "_site/$1" ] && jq -r .generated_at "_site/$1" || echo ""; }
+          jq -n --arg feed "$(v feed.json)" --arg near "$(v near.json)" --arg ar "$(v ar.json)" '{feed: $feed, near: $near, ar: $ar}' > _site/version.json
+          cat _site/version.json
 
       # Browsers may reuse app.js and style.css for 10 minutes, so right after a release a page could mix
       # new HTML with old scripts. Tag both addresses with the commit so each release loads its own files.
       - name: Assemble site
         run: |
-          cp -r index.html app.js style.css fonts CNAME _site/
+          cp -r index.html app.js style.css fonts icons manifest.webmanifest sw.js og-image.png CNAME _site/
           v="${GITHUB_SHA::7}"
           sed -i "s|src=\"app.js\"|src=\"app.js?v=$v\"|; s|href=\"style.css\"|href=\"style.css?v=$v\"|" _site/index.html
           grep -q "app.js?v=$v" _site/index.html && grep -q "style.css?v=$v" _site/index.html
