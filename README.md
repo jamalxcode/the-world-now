@@ -65,6 +65,29 @@ The design follows heat.sala.company: Inter, soft cards and an automatic light o
 - **Syndicated copies**: when several outlets run the same story word for word (usually a wire story), the fetcher keeps the earliest and lists the others as **+N copies** (`also`), with **via Reuters** (`via`) when the text names the wire service. Different outlets' own reporting is kept and grouped on the page instead.
 - **👍 / 👎** next to each source: 👍 makes its report lead its stories, 👎 hides it. Ratings are stored in the reader's browser only (no accounts), so each person has their own and they don't sync between devices. **Sources → Your ratings** lists and undoes them.
 - **Set aside**: a source failing for over 24 hours is only retried every 6 hours, shown with ⏸ in Sources, and comes back on its own once it works.
+- **Junk filter**: `exclude_title_patterns` (newsletter ads, recaps, air-quality pages, puzzles, price-of-the-day items), `blocked_outlets` (content mills and press-release wires that Google News surfaces) and `min_title_words` in each sources file. They also clear junk that was already carried forward.
+- **Source quality**: each outlet has a tier (`tier()` in `app.js`): **wire** (Reuters, AP, AFP, Bloomberg), **established** (our configured sources plus well-known outlets in `KNOWN_OUTLETS`), **lesser-known** (other outlets found through Google News, marked **?**) and **social** (TG / BSKY). Breaking needs 3+ established outlets; Top stories weigh outlets by tier, so content mills can't inflate a story. 🔒 marks usually-paywalled outlets (`PAYWALLED`). Automated finance/SEO sites in `DEFAULT_HIDDEN` start hidden, and each reader can un-hide them under Sources.
+
+## Data files and refresh
+
+| File | What | Who reads it |
+|---|---|---|
+| `feed.json` | 48 hours of headlines (up to 6,500) | the page for "Last 48 hours"; the Meridian map |
+| `feed-24h.json` | the last 24 hours | the page, on opening |
+| `near.json` / `ar.json` | Google News per country / Arabic headlines | the page (Near me / العربية) |
+| `*-new.json` | the last ~75 minutes of each | the page's quick refresh |
+| `version.json` | each file's build time (~100 bytes) | the page, every refresh |
+| `breaking.json` | stories breaking now | the installed app's background check (`sw.js`) |
+| `local.json` | Arabic, Russian and Ukrainian sources | the Meridian map only |
+
+The page polls `version.json` and fetches nothing else unless a build is new; then it fetches only the small `*-new.json` files and merges them. Full files load on opening, on **Refresh now**, once an hour, and when 48 hours or Arabic is switched on. File addresses carry the build time (`?v=…`), so caches can keep them safely. An open page uses roughly 2 MB an hour instead of about 40 MB.
+
+## Arabic, sharing and the app
+
+- **⚙ View → Headlines in English / العربية / Both**: [`sources-ar.json`](sources-ar.json) has Arabic outlets plus Google News Arabic searches for Kuwait and its neighbours, which bring in Kuwaiti papers without feeds of their own (Al Rai, Al Qabas, Al Anba, Al-Seyassah). Country tagging understands Arabic place names, including attached prefixes (بالكويت, والسعودية). Arabic headlines read right to left.
+- **Link previews**: Open Graph / X tags and `og-image.png` (1200×630) give shared links a title card.
+- **Installable app**: `manifest.webmanifest`, `icons/` and `sw.js`. The app opens offline with the last headlines. Background breaking-news alerts use Periodic Background Sync, which only Chromium browsers offer, only for installed apps, at a frequency the browser picks (a few times a day). Everywhere else alerts work while the page is open. True push alerts would need a push service and a server, which this GitHub-only setup doesn't have.
+- **Text size**: ⚙ View → A / A / A (100%, 112%, 125%).
 
 ## Breaking news
 

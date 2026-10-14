@@ -9,12 +9,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>The World Now · news.sala.company</title>
-    <meta name="description" content="Live world headlines from about 95 public news, OSINT and disaster sources, refreshed every few minutes, with breaking-news alerts." />
+    <meta name="description" content="Live world headlines, your country first: 130+ news sources plus Google News for 48 countries, in English and Arabic, updated every 5 minutes. No account needed." />
+    <link rel="canonical" href="https://news.sala.company/" />
+    <!-- Link previews (WhatsApp, X, iMessage, Slack…) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="news.sala.company" />
+    <meta property="og:url" content="https://news.sala.company/" />
+    <meta property="og:title" content="The World Now: live world headlines, your country first" />
+    <meta property="og:description" content="130+ news sources plus Google News for 48 countries, in English and Arabic, updated every 5 minutes. No account needed." />
+    <meta property="og:image" content="https://news.sala.company/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="The World Now: live world headlines, your country first" />
+    <meta name="twitter:image" content="https://news.sala.company/og-image.png" />
+    <!-- Installable app -->
     <meta name="theme-color" content="#1f6fb0" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%F0%9F%8C%8D%3C/text%3E%3C/svg%3E" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="style.css" />
-    <script>try { const t = JSON.parse(localStorage.getItem("twn-theme")); if (t) document.documentElement.dataset.theme = t; } catch {}</script>
+    <script>try { const t = JSON.parse(localStorage.getItem("twn-theme")); if (t) document.documentElement.dataset.theme = t; const z = JSON.parse(localStorage.getItem("twn-text-size")); if (z) document.documentElement.style.setProperty("--zoom", z); } catch {}</script>
   </head>
   <body>
     <div class="wrap">
@@ -65,6 +82,20 @@
                 </select>
               </div>
               <div class="menu-sec">
+                <span class="menu-lab">Headlines in</span>
+                <div class="seg" id="lang" role="group" aria-label="Language of headlines">
+                  <button data-v="en">English</button>
+                  <button data-v="ar" lang="ar">العربية</button>
+                  <button data-v="both">Both</button>
+                </div>
+                <span class="menu-lab">Text size</span>
+                <div class="seg" id="textsize" role="group" aria-label="Text size">
+                  <button data-v="1" title="Normal">A</button>
+                  <button data-v="1.12" title="Larger" style="font-size:14.5px">A</button>
+                  <button data-v="1.25" title="Largest" style="font-size:16px">A</button>
+                </div>
+              </div>
+              <div class="menu-sec">
                 <span class="menu-lab">Each headline</span>
                 <button class="chip" id="btn-video" title="Search links (X, YouTube, Google News, Yandex Video, Bilibili) in each headline's actions, newest results first where the site allows it (key v)">🔎 Search links</button>
               </div>
@@ -86,6 +117,7 @@
                 <button class="chip" id="btn-heat" title="Trending terms and volume (key h)">📈 Trends</button>
                 <button class="chip" id="btn-sources" title="Every source's status, and your 👍 / 👎 ratings (key s)">📰 Sources</button>
                 <button class="chip" id="btn-help" title="Keyboard shortcuts and how it works (key ?)">? Help</button>
+                <button class="chip" id="btn-install" hidden title="Add the site to your home screen or desktop as an app">📲 Install app</button>
               </div>
               <div id="count" class="count menu-foot"></div>
             </div>

@@ -116,6 +116,12 @@ const state = {
   country: store.get("country", null) ?? detectCountry(), // "Near me" centre; "" = no location
   ratings: store.get("ratings", {}), // source name → 1 (👍) or -1 (👎); this browser only
   near: null, // near.json: Google News per-country searches
+  ar: null, // ar.json: Arabic headlines (when the language setting includes Arabic)
+  lang: store.get("lang", "en"), // headlines in "en", "ar" or "both"
+  textSize: store.get("text-size", 1), // 1, 1.12 or 1.25 (⚙ View)
+  ver: null, // last version.json
+  lastFull: 0, // when the full files were last fetched
+  loadedHours: 0, // 24 (feed-24h.json) or 48 (feed.json)
   sectionsOpen: new Set(), // "Near me" sections showing all their stories
   actsOpen: null, // the row whose actions were opened with ⋯ (phones)
   editTerms: null, // the story whose search words are being chosen (✎)
@@ -133,23 +139,71 @@ const state = {
 
 // ---------- data ----------
 
+// Data is fetched in three sizes so an open page costs little:
+//  · version.json (a few bytes): polled every couple of minutes; if nothing changed, nothing else is fetched.
+//  · *-new.json (the last ~75 minutes): fetched when a new build is out, and merged in.
+//  · the full files (feed-24h.json, or feed.json for 48 hours, near.json, ar.json): on opening, on Refresh
+//    now, once an hour (so folded copies and removals stay in step), and when 48h or Arabic is switched on.
+// Version-tagged addresses (?v=…) are new for each build, so browsers and the CDN can cache them safely.
+const FULL_EVERY = 60 * 60e3;
+
+async function getJSON(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status + " for " + url.split("?")[0]);
+  return res.json();
+}
+const maybe = (p) => p.catch(() => null);
+const tagArabic = (out) => { if (out) for (const i of out.items) i.lang = "ar"; return out; };
+
+// New headlines from a *-new.json file on top of what's loaded; status and update time come from it.
+function mergeDelta(base, delta) {
+  const ids = new Set(base.items.map((i) => i.id));
+  const since = Date.now() - (state.loadedHours || 24) * 3600e3 - 3600e3;
+  const items = delta.items.filter((i) => !ids.has(i.id)).concat(base.items.filter((i) => Date.parse(i.published) >= since))
+    .sort((a, b) => Date.parse(b.published) - Date.parse(a.published));
+  return { ...delta, items };
+}
+
 async function load(manual) {
   if (state.loading) return;
   state.loading = true;
   $("btn-fetch").textContent = "Refreshing…";
   try {
-    const t = Date.now();
-    // near.json (Google News per-country searches) is optional: Near me still works from feed.json alone.
-    const nearReq = fetch("near.json?t=" + t, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    const res = await fetch("feed.json?t=" + t, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    const near = await nearReq;
+    const ver = await maybe(getJSON("version.json?t=" + Date.now()));
+    const wantEn = state.lang !== "ar", wantAr = state.lang !== "en", want48 = state.hours > 24;
+    const full = manual || !ver || !state.data || !state.ver || Date.now() - state.lastFull > FULL_EVERY ||
+      (want48 && state.loadedHours < 48) || (wantAr && !state.ar) || (wantEn && !state.near && ver.near);
+    const same = ver && state.ver && ver.feed === state.ver.feed && ver.near === state.ver.near && ver.ar === state.ver.ar;
+    const tag = (k) => (ver && ver[k] ? "?v=" + encodeURIComponent(ver[k]) : "?t=" + Date.now());
+    let changed = false;
+    if (full) {
+      // feed-24h.json is new; before the first build that makes it, fall back to feed.json.
+      let data = null, hours = 48;
+      if (!want48) { data = await maybe(getJSON("feed-24h.json" + tag("feed"))); hours = 24; }
+      if (!data) { data = await getJSON("feed.json" + tag("feed")); hours = 48; }
+      const [near, ar] = await Promise.all([
+        wantEn ? maybe(getJSON("near.json" + tag("near"))) : null,
+        wantAr ? maybe(getJSON("ar.json" + tag("ar")).then(tagArabic)) : null,
+      ]);
+      changed = !state.data || state.data.generated_at !== data.generated_at || hours !== state.loadedHours || !!ar !== !!state.ar ||
+        (near && (!state.near || state.near.generated_at !== near.generated_at)) || (ar && state.ar && state.ar.generated_at !== ar.generated_at);
+      state.data = data;
+      state.loadedHours = hours;
+      state.near = wantEn ? near || state.near : null;
+      state.ar = wantAr ? ar || state.ar : null;
+      state.lastFull = Date.now();
+    } else if (!same) {
+      const [fd, nd, ad] = await Promise.all([
+        ver.feed !== state.ver.feed ? maybe(getJSON("feed-new.json" + tag("feed"))) : null,
+        wantEn && state.near && ver.near !== state.ver.near ? maybe(getJSON("near-new.json" + tag("near"))) : null,
+        wantAr && state.ar && ver.ar !== state.ver.ar ? maybe(getJSON("ar-new.json" + tag("ar")).then(tagArabic)) : null,
+      ]);
+      if (fd) { state.data = mergeDelta(state.data, fd); changed = true; }
+      if (nd) { state.near = mergeDelta(state.near, nd); changed = true; }
+      if (ad) { state.ar = mergeDelta(state.ar, ad); changed = true; }
+    }
+    if (ver) state.ver = ver;
     showError(null);
-    const changed = !state.data || state.data.generated_at !== data.generated_at ||
-      (near && (!state.near || state.near.generated_at !== near.generated_at));
-    state.data = data;
-    if (near) state.near = near;
     updateFreshness();
     if (changed) update(manual);
     if (manual) pollLive(true);
@@ -266,13 +320,14 @@ function combined() {
     return true;
   };
   // Google News country items (category "local") only show in Near me; drop ones the main feed already has.
-  const extra = [...state.live.values(), ...(state.near ? state.near.items : [])].filter(keep);
+  // Arabic headlines (ar.json, tagged lang "ar") join when the language setting includes Arabic.
+  const extra = [...state.live.values(), ...(state.near ? state.near.items : []), ...(state.ar ? state.ar.items : [])].filter(keep);
   return extra.length ? base.concat(extra).sort((a, b) => Date.parse(b.published) - Date.parse(a.published)) : base;
 }
 
 function update(manual) {
   const next = combined();
-  computeBreaking(next.filter((i) => i.category !== "local" && !hiddenSource(i.source)));
+  computeBreaking(next.filter((i) => !hiddenSource(i.source) && langOk(i))); // quality is judged inside (established outlets only)
   if (!state.items.length) { state.items = next; render(); return; }
   const shown = new Set(state.items.map((i) => i.id));
   const newCount = next.filter((i) => !shown.has(i.id)).length;
@@ -347,13 +402,46 @@ function clusterItems(items) {
   return out;
 }
 
+// ---------- source quality ----------
+// Who said it matters: a story isn't "breaking" because ten content mills found through Google News
+// copied it. Each outlet gets a tier, and Breaking / Top stories count established outlets.
+//   wire: the news agencies; est: our configured sources and well-known outlets that reach us through
+//   Google News; other: lesser-known outlets found through Google News; social: Telegram / Bluesky posts.
+const WIRES = new Set(["Reuters", "AP", "Associated Press", "AP News", "AFP", "Agence France-Presse", "Bloomberg", "Bloomberg.com"]);
+const KNOWN_OUTLETS = new Set(("BBC|BBC News|CNN|Al Jazeera|Al Jazeera English|Al Arabiya|Al Arabiya English|Arab News|Kuwait Times|Arab Times|Arab Times Kuwait News|KUNA|Kuwait News Agency|" +
+  "Gulf News|Khaleej Times|The National|Gulf Times|The Peninsula|Saudi Gazette|Times of Oman|Oman Observer|Asharq Al-Awsat|Middle East Eye|Al-Monitor|The New Arab|" +
+  "The New York Times|The Washington Post|The Guardian|Financial Times|The Wall Street Journal|CNBC|Forbes|Fortune|Axios|Politico|NPR|PBS|ABC News|CBS News|NBC News|Fox News|" +
+  "Sky News|The Independent|The Telegraph|The Times|Le Monde|France 24|DW|Deutsche Welle|Euronews|Anadolu Agency|Times of Israel|Haaretz|The Jerusalem Post|Ynetnews|Dawn|" +
+  "The Express Tribune|Geo News|The Hindu|Hindustan Times|The Times of India|NDTV|India Today|South China Morning Post|Nikkei Asia|The Japan Times|Kyodo News|Yonhap News Agency|" +
+  "The Straits Times|CNA|ABC (Australia)|The Sydney Morning Herald|The Globe and Mail|CBC|Toronto Star|Kyiv Independent|Ukrainska Pravda|Meduza|The Moscow Times|" +
+  "Radio Free Europe/Radio Liberty|Voice of America|Xinhua|TASS|RT|Sputnik|The Economist|The Atlantic|Foreign Policy|Defense News|Breaking Defense|Military Times|" +
+  "الراي|القبس|الأنباء|الجريدة|كونا|وكالة الأنباء الكويتية|الشرق الأوسط|العربية|الجزيرة نت|سكاي نيوز عربية|بي بي سي عربي|CNN بالعربية|العربي الجديد|الإمارات اليوم|الخليج|البيان|عكاظ|سبق").split("|"));
+// Finance and SEO bots that Google News surfaces: hidden by default, like a 👎 you didn't have to give
+// (un-hide any of them under Sources → Your ratings).
+const DEFAULT_HIDDEN = new Set(["MarketBeat", "Simply Wall St", "Zacks Investment Research", "Stock Titan", "AInvest", "TipRanks", "24/7 Wall St.", "Defense World", "Benzinga", "The Motley Fool", "Motley Fool"]);
+// Outlets that usually ask for a subscription (their YouTube videos don't).
+const PAYWALLED = new Set(["FT", "Financial Times", "WSJ", "The Wall Street Journal", "Bloomberg", "Bloomberg.com", "The Economist", "NYT", "NYT Business", "NYT Tech",
+  "The New York Times", "Washington Post", "The Washington Post", "Telegraph", "The Telegraph", "The Times", "Haaretz", "Barron's", "The Atlantic", "Foreign Policy",
+  "Nikkei Asia", "Business Insider", "Le Monde", "SCMP", "South China Morning Post", "The Information"]);
+
+let configured = new Set(); // names of the sources in our own feeds, set when data loads
+function tier(item) {
+  if (item.social) return "social";
+  if (WIRES.has(item.source)) return "wire";
+  if (configured.has(item.source) || KNOWN_OUTLETS.has(item.source)) return "est";
+  return "other";
+}
+const TIER_WEIGHT = { wire: 1.2, est: 1, other: 0.35, social: 0.5 };
+const established = (item) => { const t = tier(item); return t === "wire" || t === "est"; };
+
 function computeBreaking(items) {
   const now = Date.now();
+  configured = new Set([...(state.data ? state.data.sources : []), ...(state.ar ? state.ar.sources : [])].filter((s) => !/^Google News/.test(s.name)).map((s) => s.name));
   const recent = items.filter((i) => now - Date.parse(i.published) < BREAK_WINDOW_H * 3600e3);
   const found = [];
   for (const c of clusterItems(recent)) {
     const all = [c.item, ...c.related];
-    const sources = [...new Set(all.map((i) => i.source))];
+    const sources = [...new Set(all.filter(established).map((i) => i.source))]; // only established outlets count
     const newest = Math.max(...all.map((i) => Date.parse(i.published)));
     const oldest = Math.min(...all.map((i) => Date.parse(i.published)));
     if (sources.length >= BREAK_MIN_SOURCES && now - newest < BREAK_FRESH_MIN * 60e3) {
@@ -372,6 +460,8 @@ function notifyBreaking() {
   const fresh = state.breaking.filter((b) => !b.all.some((i) => state.alerted.has(i.id)));
   for (const b of state.breaking) for (const i of b.all) state.alerted.add(i.id);
   store.set("alerted", [...state.alerted].slice(-3000));
+  // Tell the installed app's background check (sw.js) which stories were already seen here.
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: "seen", ids: state.breaking.flatMap((b) => b.all.map((i) => i.id)) });
   // Don't fire for stories that were already breaking when the page opened.
   if (Date.now() - PAGE_START < 30000) return;
   if (!fresh.length) return;
@@ -391,13 +481,17 @@ function notifyBreaking() {
 
 // ---------- ratings (this browser only) ----------
 
-const rating = (source) => state.ratings[source] || 0;
+// Your rating if you gave one (0 = you un-hid a default-hidden outlet), else the default.
+const rating = (source) => (source in state.ratings ? state.ratings[source] : DEFAULT_HIDDEN.has(source) ? -1 : 0);
 const hiddenSource = (source) => rating(source) < 0;
+// The language setting: English, Arabic (ar.json, lang "ar") or both.
+const langOk = (i) => state.lang === "both" || (state.lang === "ar" ? i.lang === "ar" : i.lang !== "ar");
 
 function rate(source, value) {
-  if (rating(source) === value) delete state.ratings[source]; else state.ratings[source] = value;
+  const next = rating(source) === value ? 0 : value;
+  if (next === 0 && !DEFAULT_HIDDEN.has(source)) delete state.ratings[source]; else state.ratings[source] = next;
   store.set("ratings", state.ratings);
-  computeBreaking(state.items.filter((i) => i.category !== "local" && !hiddenSource(i.source)));
+  computeBreaking(state.items.filter((i) => !hiddenSource(i.source) && langOk(i)));
   render();
   if (state.panel === "sources") renderPanel();
 }
@@ -466,7 +560,7 @@ function filtered() {
   const since = Date.now() - state.hours * 3600e3;
   return state.items.filter((i) =>
     Date.parse(i.published) >= since &&
-    !hiddenSource(i.source) &&
+    !hiddenSource(i.source) && langOk(i) &&
     (state.cat === "near" ? true
       : i.category === "local" ? false
       : state.cat === "all" || (state.cat === "video" ? i.media === "video" : i.category === state.cat)) &&
@@ -540,21 +634,25 @@ function renderHiddenNote() {
 const TOP_COUNT = 6;
 function topStories() {
   const now = Date.now();
-  const recent = state.items.filter((i) => now - Date.parse(i.published) < 6 * 3600e3 && !hiddenSource(i.source) &&
+  const recent = state.items.filter((i) => now - Date.parse(i.published) < 6 * 3600e3 && !hiddenSource(i.source) && langOk(i) &&
     (state.cat === "near" || i.category !== "local"));
   const near = state.cat === "near" && state.country;
   const scored = [];
   for (const s of preferFavourites(clusterItems(recent))) {
     const all = [s.item, ...s.related];
     const sources = new Set(all.map((i) => i.source));
-    if (sources.size < 3) continue;
+    // Weight: each outlet once, by its tier (a wire 1.2, established 1, social 0.5, lesser-known 0.35).
+    const weight = new Map();
+    for (const i of all) weight.set(i.source, Math.max(weight.get(i.source) || 0, TIER_WEIGHT[tier(i)]));
+    const weighted = [...weight.values()].reduce((a, b) => a + b, 0);
+    if (weighted < 3) continue; // about three established outlets' worth
     const newest = Math.max(...all.map((i) => Date.parse(i.published)));
     const ageH = (now - newest) / 3600e3;
     const breaking = all.some((i) => state.breakingIds.has(i.id));
     const ring = near ? storyRing(s) : 3;
-    const score = sources.size * Math.exp(-ageH / 4) * (breaking ? 1.5 : 1) * (near ? [1.8, 1.4, 1.15, 1][ring] : 1);
-    // The headline: a 👍 source's (preferFavourites), else a news outlet's rather than a social post.
-    const lead = rating(s.item.source) > 0 ? s.item : all.find((i) => !i.social) || s.item;
+    const score = weighted * Math.exp(-ageH / 4) * (breaking ? 1.5 : 1) * (near ? [1.8, 1.4, 1.15, 1][ring] : 1);
+    // The headline: a 👍 source's (preferFavourites), else an established outlet's, else any news outlet's.
+    const lead = rating(s.item.source) > 0 ? s.item : all.find(established) || all.find((i) => !i.social) || s.item;
     scored.push({ lead, sources: [...sources], reports: all.length, newest, breaking, ring, score });
   }
   return scored.sort((a, b) => b.score - a.score).slice(0, TOP_COUNT);
@@ -574,7 +672,7 @@ function renderTop() {
       const others = t.sources.filter((s) => s !== t.lead.source);
       return '<article class="ts-card' + (t.breaking ? " brk" : "") + '">' +
         '<div class="ts-tags">' + (t.breaking ? '<span class="brk-tag">Breaking</span>' : "") + (state.cat === "near" && t.ring < 3 ? '<span class="ts-place">' + (t.ring === 0 ? "📍 " : "") + esc(titles[t.ring]) + "</span>" : "") + "</div>" +
-        '<a class="ts-title" href="' + esc(t.lead.url) + '" target="_blank" rel="noopener" data-id="' + t.lead.id + '">' + mediaIcon(t.lead) + esc(t.lead.title) + "</a>" +
+        '<a class="ts-title" dir="auto" href="' + esc(t.lead.url) + '" target="_blank" rel="noopener" data-id="' + t.lead.id + '">' + mediaIcon(t.lead) + esc(t.lead.title) + "</a>" +
         '<div class="ts-foot"><span title="' + esc(t.sources.join(", ")) + '">' + esc(t.lead.source) + (others.length ? " + " + others.length + " more" : "") + '</span> · <span data-t="' + new Date(t.newest).toISOString() + '">' + timeAgo(new Date(t.newest).toISOString()) + "</span>" +
         '<button class="ts-all" data-jump="' + t.lead.id + '" title="Show all ' + t.reports + ' reports in the feed">' + t.reports + " reports →</button></div></article>";
     }).join("") + "</div>";
@@ -622,10 +720,17 @@ function syndHTML(item) {
   return h;
 }
 
+// The source's name, plus quiet trust markers: WIRE for news agencies, ? for lesser-known outlets found
+// through Google News, TG / BSKY for (unverified) social posts, YT for YouTube, 🔒 if usually paywalled.
 function srcHTML(item, tag) {
-  return "<" + tag + ' class="src" data-src="' + esc(item.source) + '" style="--h:' + srcHue(item.source) + '" title="Show only ' + esc(item.source) + '">' + esc(item.source) + "</" + tag + ">" +
-    (item.social ? ' <span class="plat" title="Social post, unverified">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>"
-      : item.id.startsWith("yt-") ? ' <span class="plat" title="Video from the outlet\'s YouTube channel">YT</span>' : "");
+  const t = tier(item);
+  let badge = "";
+  if (item.social) badge = ' <span class="plat" title="Social post: unverified">' + (item.id.startsWith("tg-") ? "TG" : "BSKY") + "</span>";
+  else if (item.id.startsWith("yt-")) badge = ' <span class="plat" title="Video from the outlet\'s YouTube channel">YT</span>';
+  else if (t === "wire") badge = ' <span class="plat wire" title="News agency: the original source many outlets reprint">WIRE</span>';
+  else if (t === "other") badge = ' <span class="plat unk" title="Lesser-known outlet, found through Google News: counts less towards Top stories and Breaking">?</span>';
+  if (PAYWALLED.has(item.source) && !item.id.startsWith("yt-")) badge += ' <span class="pay" title="Usually needs a subscription">🔒</span>';
+  return "<" + tag + ' class="src" dir="auto" data-src="' + esc(item.source) + '" style="--h:' + srcHue(item.source) + '" title="Show only ' + esc(item.source) + '">' + esc(item.source) + "</" + tag + ">" + badge;
 }
 
 function rowHTML({ item, related }, idx) {
@@ -643,7 +748,8 @@ function rowHTML({ item, related }, idx) {
   // In the time-ordered views, "Last hour / Earlier today…" dividers replace the per-row age; Near me's
   // sections have no dividers, so its rows keep a short age.
   let h = '<article class="' + cls.join(" ") + '" id="row-' + idx + '">';
-  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '">' + mediaIcon(item) + esc(item.title) + "</a>";
+  // dir="auto": Arabic headlines read right to left. The summary shows on hover (tap ⋯ on a phone).
+  h += '<a class="title" dir="auto" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '"' + (item.summary ? ' title="' + esc(item.summary) + '"' : "") + ">" + mediaIcon(item) + esc(item.title) + "</a>";
   h += '<div class="meta">' + (breaking ? '<span class="brk-tag">Breaking</span>' : "") + srcHTML(item, "button");
   if (state.cat === "near") h += '<span class="age" data-t="' + item.published + '" title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + "</span>";
   if (related.length || item.summary) {
@@ -652,13 +758,14 @@ function rowHTML({ item, related }, idx) {
   }
   h += '<button class="dots" data-acts="' + item.id + '" aria-expanded="' + (state.actsOpen === item.id) + '" aria-label="More actions" title="Time, 👍 / 👎, search links">⋯</button>';
   h += '<span class="acts"><span class="when" data-t="' + item.published + '" data-clock title="' + esc(fullTime(item.published)) + '">' + timeAgo(item.published) + " · " + hhmm(item.published) + "</span>" +
-    rateHTML(item.source) + syndHTML(item) + (state.links ? videoLinks(item, related) : "") + "</span>";
+    rateHTML(item.source) + syndHTML(item) + (state.links ? videoLinks(item, related) : "") +
+    (state.actsOpen === item.id && item.summary && !open ? '<span class="acts-sum" dir="auto">' + esc(item.summary) + "</span>" : "") + "</span>";
   h += "</div>";
   if (open) {
     if (item.summary) h += '<div class="summary">' + esc(item.summary) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a dir="auto" href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
     }
   }
   return h + "</article>";
@@ -669,7 +776,7 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
   let h = '<article class="' + cls.join(" ") + ' c" id="row-' + idx + '">';
   h += '<span class="c-time" title="' + esc(fullTime(item.published)) + " (" + timeAgo(item.published) + ' ago)">' + hhmm(item.published) + "</span>";
   h += '<span class="c-src">' + srcHTML(item, "button") + "</span>";
-  h += '<a class="title" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
+  h += '<a class="title" dir="auto" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-id="' + item.id + '" title="' + esc(item.title) + '">' +
     (breaking ? '<span class="brk-tag">Breaking</span> ' : "") + mediaIcon(item) + esc(item.title) + "</a>";
   { // always there: details hold 👍/👎 too
     const label = related.length ? "+" + related.length : open ? "−" : "…";
@@ -683,7 +790,7 @@ function compactRowHTML(item, related, idx, cls, breaking, open) {
     if (state.links) h += '<div class="actions">' + videoLinks(item, related) + "</div>";
     if (related.length) {
       h += '<div class="related">' + related.map((r) =>
-        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
+        '<div class="r">' + srcHTML(r, "button") + ' <span class="ago" data-t="' + r.published + '">' + timeAgo(r.published) + '</span><a dir="auto" href="' + esc(r.url) + '" target="_blank" rel="noopener" data-id="' + r.id + '">' + mediaIcon(r) + esc(r.title) + "</a></div>").join("") + "</div>";
     }
     h += "</div>";
   }
@@ -912,7 +1019,7 @@ function renderCatCounts() {
   const counts = {};
   const since = Date.now() - state.hours * 3600e3;
   for (const i of state.items) {
-    if (Date.parse(i.published) < since || hiddenSource(i.source)) continue;
+    if (Date.parse(i.published) < since || hiddenSource(i.source) || !langOk(i)) continue;
     if (state.country && ringOf(i.geo) === 0) counts.near = (counts.near || 0) + 1; // your country's count
     if (i.category === "local") continue;
     counts[i.category] = (counts[i.category] || 0) + 1;
@@ -948,6 +1055,8 @@ function renderButtons() {
   document.querySelectorAll("#view button").forEach((b) => b.setAttribute("aria-pressed", (b.dataset.v === "grouped") === state.cluster));
   $("interval").value = String(state.interval);
   $("interval").disabled = !state.auto;
+  document.querySelectorAll("#lang button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === state.lang));
+  document.querySelectorAll("#textsize button").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.v === state.textSize));
 }
 
 function renderAll() {
@@ -975,7 +1084,8 @@ function helpHTML() {
     "<p>When several outlets run the same wire story word for word, only the earliest is shown, marked <b>via Reuters</b> (or AP…) and <b>+N copies</b>. <b>Grouped</b> puts different reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
     "<p>Each headline shows its source and how many reports it has. Hover over it (or tap <b>⋯</b> on a phone) for the exact time, 👍 / 👎 and search links. Layout, time range, alerts, Trends and Sources are under <b>⚙ View</b>.</p>" +
     "<p><b>👍</b> a source to make its reports lead their stories; <b>👎</b> one to hide it. Ratings stay in this browser only (no account). Manage them under Sources.</p>" +
-    "<p>Posts marked <b>TG</b> (Telegram) or <b>BSKY</b> (Bluesky) come from social accounts and are unverified. Click a source's name to show only that source.</p>" +
+    "<p>Markers next to a source: <b>WIRE</b> a news agency; <b>?</b> a lesser-known outlet found through Google News (counts less towards Top stories and Breaking); <b>TG</b> / <b>BSKY</b> social posts, unverified; 🔒 usually needs a subscription. Click a source's name to show only that source.</p>" +
+    "<p>Under <b>⚙ View</b>: headlines in English, العربية or both; text size; and <b>📲 Install app</b> to add the site to your home screen. Installed on Android (Chrome, Edge, Samsung Internet), the app can also check for breaking news while closed, a few times a day; elsewhere alerts work while the page is open.</p>" +
     "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your location, ratings, theme, alerts and sound stay as they are.</p></div></div>";
 }
 
@@ -984,9 +1094,13 @@ function sourcesHTML() {
   if (!d) return "<h2>Sources</h2><p>No data yet.</p>";
   // Your ratings first, including outlets that only appear through Google News.
   const rated = Object.keys(state.ratings).sort((a, b) => state.ratings[b] - state.ratings[a] || a.localeCompare(b));
+  const mark = (name) => (rating(name) > 0 ? "👍" : rating(name) < 0 ? "👎" : "·");
   let h = "<h2>Your ratings</h2>" + (rated.length
-    ? '<div class="src-list">' + rated.map((name) => '<div class="src-row rated"><span>' + (state.ratings[name] > 0 ? "👍" : "👎") + "</span><span>" + esc(name) + "</span>" + rateHTML(name) + "</div>").join("") + "</div>"
+    ? '<div class="src-list">' + rated.map((name) => '<div class="src-row rated"><span>' + mark(name) + "</span><span>" + esc(name) + "</span>" + rateHTML(name) + "</div>").join("") + "</div>"
     : "<p>None yet. 👍 a source to make its reports lead their stories, 👎 to hide it. Ratings stay in this browser only.</p>");
+  // Finance and SEO bots hidden for everyone unless you un-hide them (👎 again to show).
+  h += '<h3 style="margin-top:14px">Hidden by default</h3><p>Automated finance and SEO sites that Google News surfaces. Tap 👎 to show one.</p>' +
+    '<div class="src-list">' + [...DEFAULT_HIDDEN].filter((n) => !(n in state.ratings)).map((name) => '<div class="src-row rated"><span>👎</span><span>' + esc(name) + "</span>" + rateHTML(name) + "</div>").join("") + "</div>";
   // Each name once (several feeds can share one, like "NYT"): worst status first.
   const byName = new Map();
   for (const s of d.sources) {
@@ -1011,7 +1125,7 @@ function trendingTerms(n) {
   const now = Date.now();
   const counts = new Map();
   for (const i of state.items) {
-    if (now - Date.parse(i.published) >= 6 * 3600e3 || hiddenSource(i.source)) continue;
+    if (now - Date.parse(i.published) >= 6 * 3600e3 || hiddenSource(i.source) || !langOk(i)) continue;
     for (const t of tokens(i.title)) counts.set(t, (counts.get(t) || 0) + 1);
   }
   return [...counts].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, n);
@@ -1209,6 +1323,48 @@ async function toggleAlerts() {
   }
   store.set("alerts", state.alerts);
   renderButtons();
+  backgroundAlerts(state.alerts);
+}
+
+// ---------- installed app & background alerts (sw.js) ----------
+
+let swReg = null;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").then((r) => { swReg = r; if (state.alerts) backgroundAlerts(true); }).catch(() => {});
+}
+// Periodic Background Sync lets an installed app check breaking.json while closed. Only Chromium browsers
+// offer it, only for installed apps, and they decide how often it runs (a few times a day at most).
+async function backgroundAlerts(on) {
+  try {
+    if (!swReg || !("periodicSync" in swReg)) return;
+    if (!on) { await swReg.periodicSync.unregister("breaking"); return; }
+    const perm = await navigator.permissions.query({ name: "periodic-background-sync" });
+    if (perm.state === "granted") await swReg.periodicSync.register("breaking", { minInterval: 30 * 60e3 });
+  } catch { /* not supported here: alerts work while the page is open */ }
+}
+// Install button: Chrome / Edge / Android offer an install prompt; iPhone uses Share → Add to Home Screen.
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; $("btn-install").hidden = false; });
+window.addEventListener("appinstalled", () => { $("btn-install").hidden = true; installPrompt = null; });
+if (/iPhone|iPad/.test(navigator.userAgent) && !navigator.standalone) $("btn-install").hidden = false;
+$("btn-install").onclick = async () => {
+  if (installPrompt) { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; $("btn-install").hidden = true; }
+  else showError("To install on iPhone or iPad: tap Share, then “Add to Home Screen”.");
+};
+
+function setLang(lang) {
+  state.lang = lang;
+  store.set("lang", lang);
+  state.sel = -1;
+  renderButtons();
+  load(false).then(() => { state.items = combined(); render(); }); // fetches ar.json the first time Arabic is on
+}
+
+function setTextSize(z) {
+  state.textSize = z;
+  store.set("text-size", z);
+  document.documentElement.style.setProperty("--zoom", z);
+  renderButtons();
 }
 
 function applyTheme(th) {
@@ -1240,6 +1396,8 @@ $("btn-sources").onclick = () => { setMenu(false); togglePanel("sources"); };
 $("btn-help").onclick = () => { setMenu(false); togglePanel("help"); };
 $("view").onclick = (e) => { const b = e.target.closest("button"); if (b) setCluster(b.dataset.v === "grouped"); };
 $("density").onclick = (e) => { const b = e.target.closest("button"); if (b) setDensity(b.dataset.v); };
+$("lang").onclick = (e) => { const b = e.target.closest("button"); if (b) setLang(b.dataset.v); };
+$("textsize").onclick = (e) => { const b = e.target.closest("button"); if (b) setTextSize(+b.dataset.v); };
 $("staged").onclick = () => { applyPending(); window.scrollTo({ top: 0 }); };
 $("search").oninput = (e) => { state.query = e.target.value; state.sel = -1; render(); };
 $("country").onchange = (e) => {
