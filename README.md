@@ -18,13 +18,13 @@ Live world headlines at **https://news.sala.company**. It runs entirely on GitHu
   - **Public Bluesky accounts**, read through the public API with no account needed.
 
   It then drops items older than 48 hours, removes duplicates and writes `feed.json`. Most feeds only list their latest ~15 stories, so each build also **carries forward** the previous build's headlines (`-carry`, read from the live `feed.json`) until they are 48 hours old; otherwise the second day would be nearly empty. A source removed from `sources.json` ages out within 48 hours.
-- **`index.html`, `app.js`, `style.css`**: a static page with no build step. It loads `feed.json`, polls for new builds and checks the Bluesky accounts **live every 60 seconds** between builds.
+- **`index.html`, `app.js`, `style.css`**: a static page with no build step. It loads the last 6 hours first, the rest of the day behind them, then polls for new builds.
 - **`.github/workflows/update.yml`**: started every 5 minutes by cron-job.org (see **Timers**), on every push and on demand (**Actions → Update news & deploy → Run workflow**). Only `main` deploys.
 - **`.github/workflows/freshness.yml`**: hourly check that the live `feed.json` is under 30 minutes old. If it isn't, the run fails and GitHub emails you.
 
 ## Timers
 
-GitHub's own schedules are unreliable: in the first 3 hours, the 5-minute schedule here didn't fire once. So, as on heat.sala.company, **cron-job.org** starts the workflows through GitHub's API (`workflow_dispatch`). GitHub's schedules stay on as a backup, and the page polls the Bluesky accounts live in the meantime.
+GitHub's own schedules are unreliable: in the first 3 hours, the 5-minute schedule here didn't fire once. So, as on heat.sala.company, **cron-job.org** starts the workflows through GitHub's API (`workflow_dispatch`). GitHub's schedules stay on as a backup.
 
 | cron-job.org job | Every | URL (method POST) |
 |---|---|---|
@@ -56,7 +56,7 @@ The design follows heat.sala.company: Inter, soft cards and an automatic light o
 **📍 Near me** (the default view) lists news in rings: the reader's country, then its neighbourhood (for Kuwait: the Gulf), its region (the Middle East) and the rest of the world, each newest first. The country comes from the device's time zone, with no permission prompt; the 📍 menu changes it (or 🌐 Anywhere). The region table is `GEO_GROUPS` in `app.js`.
 
 - The fetcher tags each headline with countries (`geo`): from the places, demonyms, capitals and big cities named in it (`geoData` in `fetcher/enrich.go`), or, when it names none, the outlet's home country (`"country"` in `sources.json`).
-- [`sources-near.json`](sources-near.json) adds Google News searches for ~50 countries, built into `near.json`. Each is fetched every 30 minutes (`every_minutes`) to stay gentle with Google; carry-forward fills the gaps. These headlines only appear in Near me. To add a country, copy a line and set `about` to its code.
+- [`sources-near.json`](sources-near.json) adds Google News searches for ~50 countries, built into `near.json`. Each is fetched every 30 minutes (`every_minutes`) to stay gentle with Google; carry-forward fills the gaps. These headlines only appear in Near me. To add a country, copy a line and set `about` to its code. Kuwait also has `site:` searches for KUNA, Arab Times and Kuwait Times, which have no working feeds of their own. In each Near me section a lesser-known outlet shows at most 3 single stories, so one busy market-data site can't fill it. The well-known outlets that arrive through Google News are listed once, in `sources.json` → `known_outlets`; the page and `breaking.json` both use that list.
 - A story sits in the ring of its headline's countries; if the headline names none, where most of its reports point.
 - The **Last 6h / 12h / 24h / 48h** menu limits every view; the default is 24 hours. The data keeps 48 hours.
 
@@ -73,11 +73,12 @@ The design follows heat.sala.company: Inter, soft cards and an automatic light o
 | File | What | Who reads it |
 |---|---|---|
 | `feed.json` | 48 hours of headlines (up to 6,500) | the page for "Last 48 hours"; the Meridian map |
-| `feed-24h.json` | the last 24 hours | the page, on opening |
-| `near.json` / `ar.json` | Google News per country / Arabic headlines | the page (Near me / العربية) |
+| `feed-start.json` / `near-start.json` | the last 6 hours | the page, shown first on opening |
+| `feed-24h.json` | the last 24 hours | the page, loaded right after the first 6 hours |
+| `near.json` / `ar.json` | Google News per country (24 hours, up to 6,000) / Arabic headlines | the page (near.json only once Near me is opened; ar.json for العربية) |
 | `*-new.json` | the last ~75 minutes of each | the page's quick refresh |
 | `version.json` | each file's build time (~100 bytes) | the page, every refresh |
-| `breaking.json` | stories breaking now | the installed app's background check (`sw.js`) |
+| `breaking.json` | stories breaking now, plus which were already pushed | the installed app's background check (`sw.js`); the ntfy.sh push alerts |
 | `local.json` | Arabic, Russian and Ukrainian sources | the Meridian map only |
 
 The page polls `version.json` and fetches nothing else unless a build is new; then it fetches only the small `*-new.json` files and merges them. Full files load on opening, on **Refresh now**, once an hour, and when 48 hours or Arabic is switched on. File addresses carry the build time (`?v=…`), so caches can keep them safely. An open page uses roughly 2 MB an hour instead of about 40 MB.
@@ -86,7 +87,7 @@ The page polls `version.json` and fetches nothing else unless a build is new; th
 
 - **⚙ View → Headlines in English / العربية / Both**: [`sources-ar.json`](sources-ar.json) has Arabic outlets plus Google News Arabic searches for Kuwait and its neighbours, which bring in Kuwaiti papers without feeds of their own (Al Rai, Al Qabas, Al Anba, Al-Seyassah). Country tagging understands Arabic place names, including attached prefixes (بالكويت, والسعودية). Arabic headlines read right to left.
 - **Link previews**: Open Graph / X tags and `og-image.png` (1200×630) give shared links a title card.
-- **Installable app**: `manifest.webmanifest`, `icons/` and `sw.js`. The app opens offline with the last headlines. Background breaking-news alerts use Periodic Background Sync, which only Chromium browsers offer, only for installed apps, at a frequency the browser picks (a few times a day). Everywhere else alerts work while the page is open. True push alerts would need a push service and a server, which this GitHub-only setup doesn't have.
+- **Installable app**: `manifest.webmanifest`, `icons/` and `sw.js`. The app opens offline with the last headlines. Background breaking-news alerts use Periodic Background Sync, which only Chromium browsers offer, only for installed apps, at a frequency the browser picks (a few times a day). Everywhere else alerts work while the page is open. **Push alerts on any device** (iPhone included) go through [ntfy.sh](https://ntfy.sh/news-sala-company-breaking), free and with no account: after each deploy, the workflow's `alerts` job sends the stories in `breaking.json`'s `notify` list to the topic `news-sala-company-breaking`. `breaking.json` remembers the headlines it has pushed for 12 hours, so each story is pushed once, at most 3 per build, and nothing is pushed on a build that couldn't read the previous list. Readers subscribe in the ntfy app or on that web page (⚙ View → 📣 Phone alerts). The topic is public: anyone who knows the name can read it, and could post to it too.
 - **Text size**: ⚙ View → A / A / A (100%, 112%, 125%).
 
 ## Breaking news
