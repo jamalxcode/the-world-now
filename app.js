@@ -1,5 +1,5 @@
 // The World Now — reads feed.json (rebuilt every ~5 min by a GitHub Action),
-// polls the listed Bluesky accounts live in between, and flags breaking stories.
+// shows the last 6 hours first and the rest behind it, and flags breaking stories.
 "use strict";
 
 const CATS = [
@@ -13,7 +13,6 @@ const STOP = new Set(("about above after again against also among amid amidst ar
 const BREAK_MIN_SOURCES = 3;
 const BREAK_WINDOW_H = 3;
 const BREAK_FRESH_MIN = 90;
-const LIVE_POLL_S = 60;
 const PAGE_START = Date.now();
 
 // What ↺ Reset returns to. Theme, alerts, sound, your location and your 👍/👎 ratings are personal
@@ -94,8 +93,6 @@ const store = {
 
 const state = {
   data: null,
-  live: new Map(), // id -> item, from direct Bluesky polling
-  liveAt: null,
   items: [], // what is on screen
   pending: null, // newer combined list waiting to be applied
   freshIds: new Set(),
@@ -139,11 +136,13 @@ const state = {
 
 // ---------- data ----------
 
-// Data is fetched in three sizes so an open page costs little:
+// Data is fetched in sizes so an open page costs little:
 //  · version.json (a few bytes): polled every couple of minutes; if nothing changed, nothing else is fetched.
 //  · *-new.json (the last ~75 minutes): fetched when a new build is out, and merged in.
+//  · *-start.json (the last 6 hours): shown first on opening, while the full files load behind it.
 //  · the full files (feed-24h.json, or feed.json for 48 hours, near.json, ar.json): on opening, on Refresh
 //    now, once an hour (so folded copies and removals stay in step), and when 48h or Arabic is switched on.
+//    near.json (Google News country searches, only shown in Near me) loads when Near me is first opened.
 // Version-tagged addresses (?v=…) are new for each build, so browsers and the CDN can cache them safely.
 const FULL_EVERY = 60 * 60e3;
 
@@ -164,25 +163,45 @@ function mergeDelta(base, delta) {
   return { ...delta, items };
 }
 
+// Near me shows Google News country searches (near.json), loaded the first time it opens.
+const nearNeeded = () => { if (state.cat === "near" && state.lang !== "ar" && !state.near && state.data) load(false); };
+
+let loadAgain = false; // a load was asked for (e.g. Near me opened) while one was running
 async function load(manual) {
-  if (state.loading) return;
+  if (state.loading) { loadAgain = true; return; }
   state.loading = true;
   $("btn-fetch").textContent = "Refreshing…";
   try {
     const ver = await maybe(getJSON("version.json?t=" + Date.now()));
     const wantEn = state.lang !== "ar", wantAr = state.lang !== "en", want48 = state.hours > 24;
+    const wantNear = wantEn && state.cat === "near";
     const full = manual || !ver || !state.data || !state.ver || Date.now() - state.lastFull > FULL_EVERY ||
-      (want48 && state.loadedHours < 48) || (wantAr && !state.ar) || (wantEn && !state.near && ver.near);
+      (want48 && state.loadedHours < 48) || (wantAr && !state.ar);
     const same = ver && state.ver && ver.feed === state.ver.feed && ver.near === state.ver.near && ver.ar === state.ver.ar;
     const tag = (k) => (ver && ver[k] ? "?v=" + encodeURIComponent(ver[k]) : "?t=" + Date.now());
     let changed = false;
+    if (!state.data && ver && !want48 && !wantAr) {
+      // Opening: the last 6 hours first (a few hundred KB), so headlines show at once.
+      const [fs, ns] = await Promise.all([
+        maybe(getJSON("feed-start.json" + tag("feed"))),
+        wantNear ? maybe(getJSON("near-start.json" + tag("near"))) : null,
+      ]);
+      if (fs) {
+        state.data = fs;
+        state.near = ns;
+        state.loadedHours = 6;
+        state.filling = true;
+        updateFreshness();
+        update(false);
+      }
+    }
     if (full) {
       // feed-24h.json is new; before the first build that makes it, fall back to feed.json.
       let data = null, hours = 48;
       if (!want48) { data = await maybe(getJSON("feed-24h.json" + tag("feed"))); hours = 24; }
       if (!data) { data = await getJSON("feed.json" + tag("feed")); hours = 48; }
       const [near, ar] = await Promise.all([
-        wantEn ? maybe(getJSON("near.json" + tag("near"))) : null,
+        wantNear || (wantEn && state.near) ? maybe(getJSON("near.json" + tag("near"))) : null,
         wantAr ? maybe(getJSON("ar.json" + tag("ar")).then(tagArabic)) : null,
       ]);
       changed = !state.data || state.data.generated_at !== data.generated_at || hours !== state.loadedHours || !!ar !== !!state.ar ||
@@ -202,108 +221,32 @@ async function load(manual) {
       if (nd) { state.near = mergeDelta(state.near, nd); changed = true; }
       if (ad) { state.ar = mergeDelta(state.ar, ad); changed = true; }
     }
+    let quiet = false;
+    if (wantNear && !state.near) { // Near me opened for the first time
+      const near = await maybe(getJSON("near.json" + tag("near")));
+      if (near) { state.near = near; changed = quiet = true; }
+    }
     if (ver) state.ver = ver;
+    const filled = state.filling && state.loadedHours > 6;
+    if (filled) { state.filling = false; quiet = true; }
     showError(null);
     updateFreshness();
-    if (changed) update(manual);
-    if (manual) pollLive(true);
+    // Filling in the rest of the day, or Near me's searches when it opens, isn't "new headlines": no highlight, no beep.
+    if (changed) update(manual, quiet);
   } catch (e) {
     showError("Couldn't load the latest headlines (" + e.message + "). " + (state.items.length ? "Showing the last ones loaded." : "Press Refresh to try again."));
     if (!state.items.length) $("feed").innerHTML = '<div class="empty">No headlines yet. Press Refresh to try again.</div>';
   } finally {
     state.loading = false;
     $("btn-fetch").textContent = "Refresh now";
+    if (loadAgain) { loadAgain = false; load(false); }
   }
-}
-
-// Bluesky's public API allows browser requests, so between feed builds we
-// fetch the newest posts from the accounts the build lists in data.live.
-let livePolling = false;
-async function pollLive(force) {
-  if (!state.data || !state.data.live || livePolling || (!force && document.hidden)) return;
-  livePolling = true;
-  const cutoff = Date.now() - 48 * 3600e3;
-  let added = 0;
-  try {
-    await Promise.all(state.data.live.map(async (src) => {
-      try {
-        const u = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?filter=posts_no_replies&limit=10&actor=" + encodeURIComponent(src.handle);
-        const res = await fetch(u);
-        if (!res.ok) return;
-        const { feed } = await res.json();
-        for (const it of feed || []) {
-          const item = bskyItem(it, src);
-          if (!item || state.live.has(item.id) || Date.parse(item.published) < cutoff) continue;
-          state.live.set(item.id, item);
-          added++;
-        }
-      } catch { /* one account failing shouldn't stop the rest */ }
-    }));
-  } finally {
-    livePolling = false;
-  }
-  for (const [id, it] of state.live) if (Date.parse(it.published) < cutoff) state.live.delete(id);
-  state.liveAt = new Date();
-  updateFreshness();
-  renderRail(); // "updated 3m ago"
-  if (added) update(false);
-}
-
-function bskyItem(it, src) {
-  if (it.reason) return null; // repost
-  const p = it.post;
-  const rkey = p.uri.split("/").pop();
-  let [title, summary] = splitPost((p.record && p.record.text) || "");
-  let url = "https://bsky.app/profile/" + src.handle + "/post/" + rkey;
-  const ext = p.embed && p.embed.external;
-  if (ext && /^https?:/.test(ext.uri)) {
-    url = ext.uri;
-    if (ext.title && (title.length < 30 || title.includes("http"))) title = ext.title.trim();
-  }
-  if (title.split(/\s+/).filter(Boolean).length < 4) return null; // same rule as the fetcher
-  const isVideo = (t) => typeof t === "string" && t.startsWith("app.bsky.embed.video");
-  const hint = p.embed && (isVideo(p.embed.$type) || (p.embed.media && isVideo(p.embed.media.$type))) ? "video" : "";
-  const item = { id: "bsky-" + rkey, title, url, source: src.name, category: src.category, published: new Date(p.record.createdAt).toISOString(), summary, social: true };
-  const media = detectMedia(hint, url, title);
-  if (media) item.media = media;
-  return item;
-}
-
-// Mirrors detectMedia in fetcher/main.go.
-const VIDEO_URL = /(\/videos?\/|\/av\/|\/watch\/|\/clip\/|\/live-video|youtube\.com\/(watch|shorts|live)|youtu\.be\/|vimeo\.com\/|rumble\.com\/|\.(mp4|m3u8|webm)(\?|$))/i;
-const AUDIO_URL = /(\/podcasts?\/|\/audio\/|\/sounds\/|\/listen\/|\/radio\/|open\.spotify\.com\/(episode|show)|podcasts\.apple\.com\/|soundcloud\.com\/|\.(mp3|m4a|ogg)(\?|$))/i;
-function detectMedia(hint, url, title) {
-  if (hint) return hint;
-  if (VIDEO_URL.test(url) || /^(watch|video|live video)\s*[:|–—-]/i.test(title)) return "video";
-  if (AUDIO_URL.test(url) || /^(listen|podcast|audio)\s*[:|–—-]/i.test(title)) return "audio";
-  return "";
 }
 
 function mediaIcon(item) {
   if (item.media === "video") return '<span class="media" role="img" aria-label="Has video" title="Has video">📺</span>';
   if (item.media === "audio") return '<span class="media" role="img" aria-label="Has audio" title="Has audio">🔊</span>';
   return "";
-}
-
-// Mirrors splitPost/tidyPostTitle in fetcher/main.go.
-function splitPost(text) {
-  text = text.replace(/(https?:\/\/\S+|\b[a-z0-9-]+\.(rs|com|org|net|co|ly|gl|me|news|io|tv|uk)\/\S*)/gi, "");
-  const lines = text.split("\n").map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
-  if (!lines.length) return ["", ""];
-  let title = lines[0], rest = lines.slice(1).join(" ");
-  if (title.length < 25 && rest) { title += " " + rest; rest = ""; }
-  if (title.length > 220) {
-    let cut = 220;
-    for (let i = 80; i < 220; i++) if (".!?".includes(title[i]) && title[i + 1] === " ") { cut = i + 1; break; }
-    rest = (title.slice(cut) + " " + rest).trim();
-    title = title.slice(0, cut).trim() + (cut === 220 ? "…" : "");
-  }
-  return [tidyPostTitle(title), rest.slice(0, 280)];
-}
-
-function tidyPostTitle(t) {
-  for (let i = 0; i < 3; i++) t = t.replace(/^[^\p{L}\p{N}"'“(#]+/u, "").replace(/^#?(breaking|urgent|just in|flash)\b\s*[:\-–—|]*\s*/i, "");
-  return t.replace(/#(\p{L})/gu, "$1").trim();
 }
 
 const normTitle = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -321,14 +264,14 @@ function combined() {
   };
   // Google News country items (category "local") only show in Near me; drop ones the main feed already has.
   // Arabic headlines (ar.json, tagged lang "ar") join when the language setting includes Arabic.
-  const extra = [...state.live.values(), ...(state.near ? state.near.items : []), ...(state.ar ? state.ar.items : [])].filter(keep);
+  const extra = [...(state.near ? state.near.items : []), ...(state.ar ? state.ar.items : [])].filter(keep);
   return extra.length ? base.concat(extra).sort((a, b) => Date.parse(b.published) - Date.parse(a.published)) : base;
 }
 
-function update(manual) {
+function update(manual, quiet) {
   const next = combined();
   computeBreaking(next.filter((i) => !hiddenSource(i.source) && langOk(i))); // quality is judged inside (established outlets only)
-  if (!state.items.length) { state.items = next; render(); return; }
+  if (!state.items.length || quiet) { state.items = next; state.pending = null; renderStaged(0); render(); return; }
   const shown = new Set(state.items.map((i) => i.id));
   const newCount = next.filter((i) => !shown.has(i.id)).length;
   state.pending = next;
@@ -353,7 +296,6 @@ function schedule() {
   state.timers = [];
   if (!state.auto) return;
   state.timers.push(setInterval(() => load(false), state.interval * 1000));
-  state.timers.push(setInterval(() => pollLive(false), LIVE_POLL_S * 1000));
 }
 
 // ---------- clustering & breaking ----------
@@ -408,14 +350,11 @@ function clusterItems(items) {
 //   wire: the news agencies; est: our configured sources and well-known outlets that reach us through
 //   Google News; other: lesser-known outlets found through Google News; social: Telegram / Bluesky posts.
 const WIRES = new Set(["Reuters", "AP", "Associated Press", "AP News", "AFP", "Agence France-Presse", "Bloomberg", "Bloomberg.com"]);
-const KNOWN_OUTLETS = new Set(("BBC|BBC News|CNN|Al Jazeera|Al Jazeera English|Al Arabiya|Al Arabiya English|Arab News|Kuwait Times|Arab Times|Arab Times Kuwait News|KUNA|Kuwait News Agency|" +
-  "Gulf News|Khaleej Times|The National|Gulf Times|The Peninsula|Saudi Gazette|Times of Oman|Oman Observer|Asharq Al-Awsat|Middle East Eye|Al-Monitor|The New Arab|" +
-  "The New York Times|The Washington Post|The Guardian|Financial Times|The Wall Street Journal|CNBC|Forbes|Fortune|Axios|Politico|NPR|PBS|ABC News|CBS News|NBC News|Fox News|" +
-  "Sky News|The Independent|The Telegraph|The Times|Le Monde|France 24|DW|Deutsche Welle|Euronews|Anadolu Agency|Times of Israel|Haaretz|The Jerusalem Post|Ynetnews|Dawn|" +
-  "The Express Tribune|Geo News|The Hindu|Hindustan Times|The Times of India|NDTV|India Today|South China Morning Post|Nikkei Asia|The Japan Times|Kyodo News|Yonhap News Agency|" +
-  "The Straits Times|CNA|ABC (Australia)|The Sydney Morning Herald|The Globe and Mail|CBC|Toronto Star|Kyiv Independent|Ukrainska Pravda|Meduza|The Moscow Times|" +
-  "Radio Free Europe/Radio Liberty|Voice of America|Xinhua|TASS|RT|Sputnik|The Economist|The Atlantic|Foreign Policy|Defense News|Breaking Defense|Military Times|" +
-  "الراي|القبس|الأنباء|الجريدة|كونا|وكالة الأنباء الكويتية|الشرق الأوسط|العربية|الجزيرة نت|سكاي نيوز عربية|بي بي سي عربي|CNN بالعربية|العربي الجديد|الإمارات اليوم|الخليج|البيان|عكاظ|سبق").split("|"));
+// Well-known outlets that reach us through Google News: the list lives in sources.json (known_outlets) and
+// comes with feed.json, so Breaking here and in breaking.json (the push alerts) count the same outlets.
+// Arabic outlet names, for the العربية setting, stay here.
+const KNOWN_ARABIC = "الراي|القبس|الأنباء|الجريدة|كونا|وكالة الأنباء الكويتية|الشرق الأوسط|العربية|الجزيرة نت|سكاي نيوز عربية|بي بي سي عربي|CNN بالعربية|العربي الجديد|الإمارات اليوم|الخليج|البيان|عكاظ|سبق".split("|");
+let knownOutlets = new Set(KNOWN_ARABIC);
 // Finance and SEO bots that Google News surfaces: hidden by default, like a 👎 you didn't have to give
 // (un-hide any of them under Sources → Your ratings).
 const DEFAULT_HIDDEN = new Set(["MarketBeat", "Simply Wall St", "Zacks Investment Research", "Stock Titan", "AInvest", "TipRanks", "24/7 Wall St.", "Defense World", "Benzinga", "The Motley Fool", "Motley Fool"]);
@@ -428,7 +367,7 @@ let configured = new Set(); // names of the sources in our own feeds, set when d
 function tier(item) {
   if (item.social) return "social";
   if (WIRES.has(item.source)) return "wire";
-  if (configured.has(item.source) || KNOWN_OUTLETS.has(item.source)) return "est";
+  if (configured.has(item.source) || knownOutlets.has(item.source)) return "est";
   return "other";
 }
 const TIER_WEIGHT = { wire: 1.2, est: 1, other: 0.35, social: 0.5 };
@@ -437,6 +376,7 @@ const established = (item) => { const t = tier(item); return t === "wire" || t =
 function computeBreaking(items) {
   const now = Date.now();
   configured = new Set([...(state.data ? state.data.sources : []), ...(state.ar ? state.ar.sources : [])].filter((s) => !/^Google News/.test(s.name)).map((s) => s.name));
+  knownOutlets = new Set([...KNOWN_ARABIC, ...((state.data && state.data.known) || [])]);
   const recent = items.filter((i) => now - Date.parse(i.published) < BREAK_WINDOW_H * 3600e3);
   const found = [];
   for (const c of clusterItems(recent)) {
@@ -541,6 +481,7 @@ function ringTitles() {
 }
 
 const SECTION_CAP = 8; // stories shown per Near me section before "See all", so every ring fits at a glance
+const OTHER_PER_SECTION = 3;
 
 // Time-ordered views get dividers instead of an age on every row.
 function timeBucket(iso) {
@@ -575,7 +516,18 @@ function render() {
   if (state.cat === "near" && state.country) {
     // Split into rings; within each ring stories stay newest first.
     const rings = [[], [], [], []];
-    for (const s of view) rings[storyRing(s)].push(s);
+    // A lesser-known outlet (stock tickers, press-release sites) gets at most OTHER_PER_SECTION single
+    // stories per section, so one busy site can't fill your country's list.
+    const perOutlet = rings.map(() => new Map());
+    for (const s of view) {
+      const n = storyRing(s);
+      if (!s.related.length && tier(s.item) === "other") {
+        const c = (perOutlet[n].get(s.item.source) || 0) + 1;
+        perOutlet[n].set(s.item.source, c);
+        if (c > OTHER_PER_SECTION) continue;
+      }
+      rings[n].push(s);
+    }
     const titles = ringTitles();
     view = [];
     sections = [];
@@ -1079,13 +1031,13 @@ function renderPanel() {
 function helpHTML() {
   const rows = [["j / k", "Next / previous headline"], ["o / enter", "Open the selected headline"], ["space", "Show / hide more reports"], ["/", "Search"], ["esc", "Clear search, close a panel"], ["x", "↺ Reset the view"], ["r", "Refresh now"], ["n", "Show new headlines"], ["b", "Jump to the top breaking story"], ["a", "Breaking-news alerts on / off"], ["c", "Grouped / all posts"], ["d", "Comfortable / compact"], ["v", "Search links on / off"], ["h", "Trends"], ["s", "Sources"], ["?", "This help"]];
   return '<div class="panel-grid"><div><h2>Keyboard shortcuts</h2>' + rows.map(([k, d]) => '<div class="help-row"><kbd>' + k + "</kbd><span>" + d + "</span></div>").join("") + "</div>" +
-    "<div><h2>How it works</h2><p>Headlines come from about 130 public sources (news sites' RSS feeds, YouTube channels, public Telegram channels and Bluesky accounts) plus Google News searches for nearly 50 countries. A GitHub Action collects them every ~5 minutes, and this page also checks the Bluesky accounts live every minute.</p>" +
+    "<div><h2>How it works</h2><p>Headlines come from about 130 public sources (news sites' RSS feeds, YouTube channels, public Telegram channels and Bluesky accounts) plus Google News searches for nearly 50 countries. A GitHub Action collects them every ~5 minutes.</p>" +
     "<p><b>📍 Near me</b> starts with your country (from your device's time zone; change it with the 📍 menu), then its neighbourhood, its region and the rest of the world, each newest first. Countries come from the places named in each headline, or the outlet's home country.</p>" +
     "<p>When several outlets run the same wire story word for word, only the earliest is shown, marked <b>via Reuters</b> (or AP…) and <b>+N copies</b>. <b>Grouped</b> puts different reports of the same story together. A story is marked <b>Breaking</b> when " + BREAK_MIN_SOURCES + " or more different sources report it within " + BREAK_WINDOW_H + " hours and the latest report is under " + BREAK_FRESH_MIN + " minutes old.</p>" +
     "<p>Each headline shows its source and how many reports it has. Hover over it (or tap <b>⋯</b> on a phone) for the exact time, 👍 / 👎 and search links. Layout, time range, alerts, Trends and Sources are under <b>⚙ View</b>.</p>" +
     "<p><b>👍</b> a source to make its reports lead their stories; <b>👎</b> one to hide it. Ratings stay in this browser only (no account). Manage them under Sources.</p>" +
     "<p>Markers next to a source: <b>WIRE</b> a news agency; <b>?</b> a lesser-known outlet found through Google News (counts less towards Top stories and Breaking); <b>TG</b> / <b>BSKY</b> social posts, unverified; 🔒 usually needs a subscription. Click a source's name to show only that source.</p>" +
-    "<p>Under <b>⚙ View</b>: headlines in English, العربية or both; text size; and <b>📲 Install app</b> to add the site to your home screen. Installed on Android (Chrome, Edge, Samsung Internet), the app can also check for breaking news while closed, a few times a day; elsewhere alerts work while the page is open.</p>" +
+    "<p>Under <b>⚙ View</b>: headlines in English, العربية or both; text size; and <b>📲 Install app</b> to add the site to your home screen. <b>🔔 Alerts</b> notify you while the page is open. For alerts with the page closed, on any phone or computer (iPhone included), use <b>📣 Phone alerts</b>: install the free <a href=\"https://ntfy.sh\" target=\"_blank\" rel=\"noopener\">ntfy</a> app and subscribe to <b>news-sala-company-breaking</b>, or open that page in a browser and allow notifications. No account needed; each breaking story is sent once.</p>" +
     "<p><b>↺ Reset</b> clears the search and filters, closes everything and goes back to the default view. Your location, ratings, theme, alerts and sound stay as they are.</p></div></div>";
 }
 
@@ -1167,8 +1119,8 @@ function updateFreshness() {
   const ok = d.sources.filter((s) => s.ok).length;
   $("dot").className = "dot " + (age < 20 ? "ok" : age < 60 ? "warn" : "bad");
   $("fresh").innerHTML = "<b>Updated " + timeAgo(d.generated_at) + " ago</b> · " + ok + " of " + d.sources_total + " sources" +
-    (state.liveAt ? " · Bluesky live, checked " + Math.round((Date.now() - state.liveAt) / 1000) + "s ago" : "");
-  if (age >= 60) showError("Updates are running late: the last one was " + timeAgo(d.generated_at) + " ago. Bluesky posts still arrive live.");
+    (state.filling ? " · loading the rest of the day…" : "");
+  if (age >= 60) showError("Updates are running late: the last one was " + timeAgo(d.generated_at) + " ago. Showing the last ones published.");
 }
 
 function showError(msg) {
@@ -1404,7 +1356,7 @@ $("country").onchange = (e) => {
   state.country = e.target.value;
   store.set("country", state.country);
   state.sectionsOpen.clear();
-  if (state.country && state.cat !== "near") { state.cat = "near"; store.set("cat", "near"); renderCats(); }
+  if (state.country && state.cat !== "near") { state.cat = "near"; store.set("cat", "near"); renderCats(); nearNeeded(); }
   state.sel = -1;
   render();
 };
@@ -1438,7 +1390,7 @@ document.addEventListener("click", (e) => {
   else if (t.closest("[data-manage]")) { state.panel = "sources"; renderButtons(); renderPanel(); window.scrollTo({ top: 0 }); }
   else if (jump) jumpTo(jump.dataset.jump);
   else if (t.closest("[data-reset]")) reset();
-  else if (cat) { state.cat = cat.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); }
+  else if (cat) { state.cat = cat.dataset.cat; store.set("cat", state.cat); state.sel = -1; renderCats(); render(); nearNeeded(); }
   else if (t.id === "clear-src") { state.source = null; renderCats(); render(); }
   else if (src) { state.source = src.dataset.src; state.sel = -1; renderCats(); render(); window.scrollTo({ top: 0 }); }
   else if (t.dataset.toggle) toggleExpand(t.dataset.toggle);
@@ -1486,7 +1438,7 @@ window.addEventListener("scroll", () => { if (window.scrollY < 60 && state.sel <
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   document.title = "The World Now · news.sala.company";
-  if (state.auto) { load(false); pollLive(false); }
+  if (state.auto) { load(false); }
 });
 
 function tick() { $("clock").textContent = CLOCK_FMT.format(new Date()); }
@@ -1512,7 +1464,7 @@ setInterval(() => {
 applyTheme(state.theme);
 tick();
 renderAll();
-load(false).then(() => pollLive(true));
+load(false);
 schedule();
 
 // The side panel only exists on wide screens; redraw it when the window crosses that width.

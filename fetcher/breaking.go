@@ -1,9 +1,13 @@
 package main
 
 // breaking.json: stories breaking right now, for the installed app's background alerts (sw.js), which
-// can't run the page's own grouping. Same rule as the page: 3+ different established outlets (configured
-// news sources, not social posts or unknown outlets found through an aggregator) report it within
-// 3 hours, and the newest report is under 90 minutes old.
+// can't run the page's own grouping, and for the ntfy.sh push alerts the workflow sends. Same rule as the
+// page: 3+ different established outlets (configured news sources and known outlets, not social posts or
+// unknown outlets found through an aggregator) report it within 3 hours, and the newest report is under
+// 90 minutes old.
+//
+// "alerted" remembers the headlines of stories already pushed (12 hours), so a story is pushed once even
+// as its lead headline changes; "notify" lists the stories to push from this build.
 
 import (
 	"sort"
@@ -22,10 +26,23 @@ type BreakingStory struct {
 	Newest    string   `json:"newest"`
 }
 
+type AlertedStory struct {
+	Title string `json:"title"`
+	At    string `json:"at"`
+}
+
 type BreakingOut struct {
 	GeneratedAt string          `json:"generated_at"`
 	Stories     []BreakingStory `json:"stories"`
+	Notify      []BreakingStory `json:"notify"`
+	Alerted     []AlertedStory  `json:"alerted"`
 }
+
+const (
+	alertMemory   = 12 * time.Hour
+	maxNotifyRun  = 3
+	maxAlertedLen = 300
+)
 
 var groupStop = map[string]bool{}
 
@@ -46,7 +63,21 @@ func groupTokens(title string) map[string]bool {
 	return set
 }
 
-func breakingNow(items []Item, established map[string]bool, now time.Time) BreakingOut {
+// sameStory is the page's grouping rule: 3+ shared keywords, or 2 that make up a third of them.
+func sameStory(a, b map[string]bool) bool {
+	shared := 0
+	for w := range b {
+		if a[w] {
+			shared++
+		}
+	}
+	union := len(a) + len(b) - shared
+	return shared >= 3 || (shared >= 2 && union > 0 && float64(shared)/float64(union) >= 0.34)
+}
+
+// prev is the previous breaking.json (nil if there was none or it couldn't be read). Nothing is pushed
+// unless prev carries an "alerted" list, so a first build or a failed read can't send a burst of old stories.
+func breakingNow(items []Item, established map[string]bool, prev *BreakingOut, wantPrev bool, now time.Time) BreakingOut {
 	var recent []Item // newest first, like items
 	for _, it := range items {
 		if now.Sub(it.t) < 3*time.Hour && !it.Social {
@@ -66,17 +97,7 @@ func breakingNow(items []Item, established map[string]bool, now time.Time) Break
 		used[a] = true
 		group := []int{a}
 		for b := a + 1; b < len(recent); b++ {
-			if used[b] {
-				continue
-			}
-			shared := 0
-			for w := range toks[b] {
-				if toks[a][w] {
-					shared++
-				}
-			}
-			union := len(toks[a]) + len(toks[b]) - shared
-			if shared >= 3 || (shared >= 2 && union > 0 && float64(shared)/float64(union) >= 0.34) {
+			if !used[b] && sameStory(toks[a], toks[b]) {
 				used[b] = true
 				group = append(group, b)
 			}
@@ -109,5 +130,38 @@ func breakingNow(items []Item, established map[string]bool, now time.Time) Break
 	if len(out) > 5 {
 		out = out[:5]
 	}
-	return BreakingOut{GeneratedAt: now.Format(time.RFC3339), Stories: out}
+
+	// Push alerts: stories not like any headline alerted in the last 12 hours.
+	alerted := []AlertedStory{}
+	canNotify := wantPrev && prev != nil && prev.Alerted != nil
+	if prev != nil {
+		for _, a := range prev.Alerted {
+			if t, err := time.Parse(time.RFC3339, a.At); err == nil && now.Sub(t) < alertMemory {
+				alerted = append(alerted, a)
+			}
+		}
+	}
+	notify := []BreakingStory{}
+	for _, s := range out {
+		st := groupTokens(s.Title)
+		seen, exact := false, false
+		for _, a := range alerted {
+			if a.Title == s.Title {
+				exact = true
+			}
+			if sameStory(groupTokens(a.Title), st) {
+				seen = true
+			}
+		}
+		if !seen && canNotify && len(notify) < maxNotifyRun {
+			notify = append(notify, s)
+		}
+		if !exact { // every lead headline is remembered, so the story is still recognised as it's reworded
+			alerted = append(alerted, AlertedStory{Title: s.Title, At: now.Format(time.RFC3339)})
+		}
+	}
+	if len(alerted) > maxAlertedLen {
+		alerted = alerted[len(alerted)-maxAlertedLen:]
+	}
+	return BreakingOut{GeneratedAt: now.Format(time.RFC3339), Stories: out, Notify: notify, Alerted: alerted}
 }

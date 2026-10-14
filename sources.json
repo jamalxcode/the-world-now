@@ -1,5 +1,5 @@
 {
-  "_note": "Public sources only, no API keys or sign-ups. Types: RSS/Atom (url), telegram (public channel), bluesky (public account, also polled live by the browser), youtube (channel ID, from the channel's public video feed). Categories: top | world | mideast | biz | tech | defense | osint | hazard | science. Edit and push; the next run picks it up.",
+  "_note": "Public sources only, no API keys or sign-ups. Types: RSS/Atom (url), telegram (public channel), bluesky (public account), youtube (channel ID, from the channel's public video feed). Categories: top | world | mideast | biz | tech | defense | osint | hazard | science. Edit and push; the next run picks it up.",
   "max_age_hours": 48,
   "max_items": 6500,
   "per_source_limit": 60,
@@ -9,6 +9,15 @@
     "(?i)^sign up (to|for)\\b", "(?i)\\bnewsletter\\b", "(?i)^(morning|evening|midday|daily|weekly|weekend) (recap|briefing|digest|roundup)\\b",
     "(?i)\\bair quality (index|forecast|today|in)\\b", "(?i)\\bcrossword\\b", "(?i)\\bwordle\\b", "(?i)\\bsudoku\\b", "(?i)\\bhoroscope\\b", "(?i)\\blottery results?\\b"],
   "blocked_outlets": ["IQAir", "IndexBox", "Inspenet", "PR Newswire", "PRNewswire", "GlobeNewswire", "Business Wire", "EIN Presswire", "openPR.com", "Devdiscourse", "Head Topics", "LatestLY", "NewsBreak", "Ground News"],
+  "_known_note": "Well-known outlets that reach us through Google News: counted as established for Breaking and Top stories (the page reads this list from feed.json).",
+  "known_outlets": ["Reuters", "AP", "Associated Press", "AP News", "AFP", "Agence France-Presse", "Bloomberg", "Bloomberg.com",
+    "BBC", "BBC News", "CNN", "Al Jazeera", "Al Jazeera English", "Al Arabiya", "Al Arabiya English", "Arab News", "Kuwait Times", "Arab Times", "Arab Times Kuwait News", "KUNA", "Kuwait News Agency", "KUNA - Kuwait News Agency",
+    "Gulf News", "Khaleej Times", "The National", "Gulf Times", "The Peninsula", "Saudi Gazette", "Times of Oman", "Oman Observer", "Asharq Al-Awsat", "Middle East Eye", "Al-Monitor", "The New Arab",
+    "The New York Times", "The Washington Post", "The Guardian", "Financial Times", "The Wall Street Journal", "CNBC", "Forbes", "Fortune", "Axios", "Politico", "NPR", "PBS", "ABC News", "CBS News", "NBC News", "Fox News",
+    "Sky News", "The Independent", "The Telegraph", "The Times", "Le Monde", "France 24", "DW", "Deutsche Welle", "Euronews", "Anadolu Agency", "Times of Israel", "Haaretz", "The Jerusalem Post", "Ynetnews", "Dawn",
+    "The Express Tribune", "Geo News", "The Hindu", "Hindustan Times", "The Times of India", "NDTV", "India Today", "South China Morning Post", "Nikkei Asia", "The Japan Times", "Kyodo News", "Yonhap News Agency",
+    "The Straits Times", "CNA", "ABC (Australia)", "The Sydney Morning Herald", "The Globe and Mail", "CBC", "Toronto Star", "Kyiv Independent", "Ukrainska Pravda", "Meduza", "The Moscow Times",
+    "Radio Free Europe/Radio Liberty", "Voice of America", "Xinhua", "TASS", "RT", "Sputnik", "The Economist", "The Atlantic", "Foreign Policy", "Defense News", "Breaking Defense", "Military Times"],
   "sources": [
     { "name": "Google News", "category": "top", "aggregator": true, "url": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en" },
     { "name": "Reuters", "category": "top", "type": "bluesky", "handle": "reuters.com" },

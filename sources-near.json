@@ -1,7 +1,7 @@
 {
   "_note": "Google News per-country searches for the page's 'Near me' view (built into near.json). about = the country every item is tagged with. Fetched every 30 minutes each to stay gentle with Google; carry-forward fills the gaps. Add a country by copying a line.",
   "max_age_hours": 24,
-  "max_items": 3000,
+  "max_items": 6000,
   "per_source_limit": 40,
   "min_ok_sources": 10,
   "min_title_words": 3,
@@ -12,6 +12,9 @@
   "blocked_outlets": ["IQAir", "IndexBox", "Inspenet", "PR Newswire", "PRNewswire", "GlobeNewswire", "Business Wire", "EIN Presswire", "openPR.com", "Devdiscourse", "Head Topics", "LatestLY", "NewsBreak", "Ground News"],
   "sources": [
     { "name": "Google News KW", "category": "local", "aggregator": true, "about": "KW", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=Kuwait+when:1d&hl=en-US&gl=US&ceid=US:en" },
+    { "name": "Google News KW KUNA", "category": "local", "aggregator": true, "about": "KW", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=site:kuna.net.kw+when:1d&hl=en-US&gl=US&ceid=US:en" },
+    { "name": "Google News KW Arab Times", "category": "local", "aggregator": true, "about": "KW", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=site:arabtimesonline.com+when:1d&hl=en-US&gl=US&ceid=US:en" },
+    { "name": "Google News KW Kuwait Times", "category": "local", "aggregator": true, "about": "KW", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=site:kuwaittimes.com+when:1d&hl=en-US&gl=US&ceid=US:en" },
     { "name": "Google News SA", "category": "local", "aggregator": true, "about": "SA", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=Saudi+Arabia+when:1d&hl=en-US&gl=US&ceid=US:en" },
     { "name": "Google News AE", "category": "local", "aggregator": true, "about": "AE", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=UAE+OR+Dubai+OR+%22Abu+Dhabi%22+when:1d&hl=en-US&gl=US&ceid=US:en" },
     { "name": "Google News QA", "category": "local", "aggregator": true, "about": "QA", "every_minutes": 30, "url": "https://news.google.com/rss/search?q=Qatar+when:1d&hl=en-US&gl=US&ceid=US:en" },

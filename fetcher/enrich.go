@@ -5,6 +5,7 @@ package main
 // Also the per-source schedule: sources that fetch less often, and failing sources that get "parked".
 
 import (
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -216,8 +217,38 @@ func init() {
 	}
 }
 
+// Companies named after a country: "Kuwait Finance House Bahrain signs…" is Bahraini news, and "Qatar
+// Airways adds Lisbon flights" is about Portugal. When the headline names another country too, the
+// company's name doesn't count; when it names none, the company's country stands.
+var companyRE = regexp.MustCompile(`\b(National Bank of Kuwait|Kuwait Finance House|Commercial Bank of Kuwait|Kuwait Airways|Kuwait Petroleum(?: Corporation)?|Qatar National Bank|Qatar Airways|QatarEnergy|Saudi Aramco|Saudi National Bank|Saudi Arabian Airlines|Emirates NBD|Emirates Airline|First Abu Dhabi Bank|Abu Dhabi Commercial Bank|Abu Dhabi Islamic Bank|Dubai Islamic Bank|Oman Air|Gulf Air|Bank of America|Bank of China|Air India|Air China|Air Canada|Air France|Japan Airlines|Turkish Airlines|Singapore Airlines|Korean Air|Royal Jordanian|Pakistan International Airlines|Saudia|Etihad(?: Airways)?)\b`)
+
 // detectGeo returns the countries a headline names, in order of first mention.
 func detectGeo(title string) []string {
+	if masked := companyRE.ReplaceAllString(title, " · "); masked != title {
+		if g := detectGeoWords(masked); len(g) > 0 {
+			return g
+		}
+	}
+	return detectGeoWords(title)
+}
+
+// cleanOutlet tidies the outlet name an aggregator gives: "https://www.aainnwes.com/" → "aainnwes.com",
+// "Kuwait News -" → "Kuwait News". "" when nothing usable is left.
+func cleanOutlet(s string) string {
+	s = strings.TrimSpace(s)
+	if low := strings.ToLower(s); strings.Contains(low, "://") || strings.HasPrefix(low, "www.") {
+		raw := s
+		if !strings.Contains(raw, "://") {
+			raw = "https://" + raw
+		}
+		if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+			s = strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+		}
+	}
+	return strings.TrimSpace(strings.TrimRight(s, " -–—|:·,"))
+}
+
+func detectGeoWords(title string) []string {
 	var words []string
 	for _, w := range geoWordRE.FindAllString(title, -1) {
 		w = strings.Trim(possessive.Replace(w), ".-'’")
@@ -314,19 +345,44 @@ func arabicForms(w string) []string {
 
 // ---------- wire services ----------
 
-// A syndicated story usually opens with the agency's name: "DUBAI (Reuters) - …", "(AP) — …".
-var viaRE = regexp.MustCompile(`^\W{0,3}(?:[A-Z][A-Za-z.,' -]{0,40})?\(\s*(Reuters|AP|AFP|Agence France-Presse|Bloomberg|dpa|ANI|PTI|IANS|Xinhua|WAM|SPA|KUNA|QNA|ONA|BNA|Anadolu)\s*\)\s*[-–—:]`)
+// A syndicated story usually opens with the agency's name: "DUBAI (Reuters) - …", "WASHINGTON, Oct 14
+// (AP) — …". Some feeds put a byline or photo caption first, so the dateline may come a little later.
+var viaRE = regexp.MustCompile(`(?:^|[.!?"”]\s+|\n)\W{0,3}(?:[A-Z][A-Za-z0-9.,' /-]{0,50})?\(\s*(Reuters|AP|AFP|Agence France-Presse|Associated Press|Bloomberg|dpa|ANI|PTI|IANS|Xinhua|WAM|SPA|KUNA|QNA|ONA|BNA|Anadolu)\s*\)\s*[-–—:]`)
+
+// …or ends with the agency's credit line.
+var viaCreditRE = regexp.MustCompile(`(?i)(?:\(\s*(Reuters|AP|AFP)\s*\)\s*$|\b(?:reporting by [^.]{3,80}(?:;|\.)\s*(?:additional reporting|editing by)|editing by [A-Z][a-z]+ [A-Z][a-z]+\s*$)|copyright \d{4} (?:the )?associated press)`)
 
 func detectVia(summary, source string) string {
-	m := viaRE.FindStringSubmatch(summary)
-	if m == nil {
+	head := summary
+	if len(head) > 400 {
+		head = head[:400]
+	}
+	via := ""
+	if m := viaRE.FindStringSubmatch(head); m != nil {
+		via = m[1]
+	} else if m := viaCreditRE.FindStringSubmatch(summary); m != nil {
+		switch {
+		case m[1] != "":
+			via = strings.ToUpper(m[1])
+			if via == "REUTERS" {
+				via = "Reuters"
+			}
+		case strings.Contains(strings.ToLower(m[0]), "associated press"):
+			via = "AP"
+		default:
+			via = "Reuters" // "Reporting by …; Editing by …" is Reuters' house style
+		}
+	}
+	if via == "" {
 		return ""
 	}
-	via := m[1]
-	if via == "Agence France-Presse" {
+	switch via {
+	case "Agence France-Presse":
 		via = "AFP"
+	case "Associated Press":
+		via = "AP"
 	}
-	if strings.EqualFold(via, source) {
+	if f := strings.Fields(source); len(f) > 0 && strings.EqualFold(via, f[0]) { // "Reuters", "AP News", "AFP English"
 		return ""
 	}
 	return via

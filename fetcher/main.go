@@ -57,7 +57,10 @@ type Config struct {
 	// too ("Morning recap").
 	BlockedOutlets []string `json:"blocked_outlets"`
 	MinTitleWords  int      `json:"min_title_words"`
-	Sources        []Source `json:"sources"`
+	// Well-known outlets that reach us through aggregators (Google News): they count as established for
+	// Breaking, like our own sources. Published in the feed as "known" so the page uses the same list.
+	KnownOutlets []string `json:"known_outlets"`
+	Sources      []Source `json:"sources"`
 }
 
 // Set once in main from the config; used while fetching and carrying forward.
@@ -113,19 +116,12 @@ type SourceStatus struct {
 	Parked       bool   `json:"parked,omitempty"`
 }
 
-// LiveSource is a Bluesky account the browser may poll directly between builds.
-type LiveSource struct {
-	Name     string `json:"name"`
-	Handle   string `json:"handle"`
-	Category string `json:"category"`
-}
-
 type Output struct {
 	GeneratedAt string         `json:"generated_at"`
 	SourcesOK   int            `json:"sources_ok"`
 	SourcesAll  int            `json:"sources_total"`
 	Sources     []SourceStatus `json:"sources"`
-	Live        []LiveSource   `json:"live"`
+	Known       []string       `json:"known,omitempty"`
 	Items       []Item         `json:"items"`
 }
 
@@ -136,7 +132,10 @@ func main() {
 	out24 := flag.String("out24", "", "also write only the last 24 hours here (what the page loads first)")
 	outNew := flag.String("outnew", "", "also write only the last -newmin minutes here (the page's quick refresh)")
 	newMin := flag.Int("newmin", 75, "minutes of headlines in -outnew")
+	outStart := flag.String("outstart", "", "also write only the last -starthours hours here (what the page shows first)")
+	startHours := flag.Int("starthours", 6, "hours of headlines in -outstart")
 	breakingOut := flag.String("breaking", "", "also write the stories breaking now here (for the app's background alerts)")
+	breakingPrev := flag.String("breakingprev", "", "URL of the previously published breaking.json: stories it already alerted aren't alerted again")
 	flag.Parse()
 
 	raw, err := os.ReadFile(*srcPath)
@@ -278,13 +277,6 @@ func main() {
 		all = all[:cfg.MaxItems]
 	}
 
-	var live []LiveSource
-	for _, src := range cfg.Sources {
-		if src.Type == "bluesky" {
-			live = append(live, LiveSource{Name: src.Name, Handle: src.Handle, Category: src.Category})
-		}
-	}
-
 	for _, st := range statuses {
 		mark := "ok  "
 		if !st.OK {
@@ -305,7 +297,7 @@ func main() {
 		SourcesOK:   ok,
 		SourcesAll:  len(cfg.Sources),
 		Sources:     statuses,
-		Live:        live,
+		Known:       cfg.KnownOutlets,
 		Items:       all,
 	}
 	writeJSON(*outPath, out)
@@ -313,6 +305,9 @@ func main() {
 	// feed.json itself keeps the whole window for other readers (the Meridian map).
 	if *out24 != "" {
 		writeJSON(*out24, since(out, now.Add(-24*time.Hour)))
+	}
+	if *outStart != "" {
+		writeJSON(*outStart, since(out, now.Add(-time.Duration(*startHours)*time.Hour)))
 	}
 	if *outNew != "" {
 		writeJSON(*outNew, since(out, now.Add(-time.Duration(*newMin)*time.Minute)))
@@ -324,7 +319,19 @@ func main() {
 				established[src.Name] = true
 			}
 		}
-		writeJSON(*breakingOut, breakingNow(all, established, now))
+		for _, n := range cfg.KnownOutlets {
+			established[n] = true
+		}
+		var prevBreaking *BreakingOut
+		if *breakingPrev != "" {
+			if body, err := get(client, *breakingPrev+"?t="+fmt.Sprint(now.Unix()), "application/json"); err != nil {
+				log.Printf("previous breaking.json unavailable: %v", err)
+			} else if err := json.Unmarshal(body, &prevBreaking); err != nil {
+				log.Printf("previous breaking.json unreadable: %v", err)
+				prevBreaking = nil
+			}
+		}
+		writeJSON(*breakingOut, breakingNow(all, established, prevBreaking, *breakingPrev != "", now))
 	}
 }
 
@@ -372,6 +379,12 @@ func carryForward(prev *Output, cutoff time.Time, exclude []*regexp.Regexp, seen
 		}
 		seenURL[u], seenTitle[n] = true, true
 		it.t = t
+		if c := cleanOutlet(it.Source); c != "" { // names carried from builds before cleanOutlet
+			it.Source = c
+		}
+		if strings.HasPrefix(strings.ToLower(it.Summary), strings.ToLower(it.Title)) {
+			it.Summary = ""
+		}
 		out = append(out, it)
 	}
 	return out
@@ -460,10 +473,13 @@ func fetchSource(client *http.Client, src Source, cutoff, now time.Time, limit i
 		}
 		name := src.Name
 		if src.Aggregator && e.outlet != "" {
-			name = e.outlet
 			e.title = strings.TrimSuffix(e.title, " - "+e.outlet)
+			if name = cleanOutlet(e.outlet); name == "" {
+				continue
+			}
 		}
-		if strings.EqualFold(e.summary, e.title) {
+		// Google News "summaries" are just the headline and the outlet's name again.
+		if strings.EqualFold(e.summary, e.title) || (src.Aggregator && strings.HasPrefix(strings.ToLower(e.summary), strings.ToLower(e.title))) {
 			e.summary = ""
 		}
 		id := e.id
