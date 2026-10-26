@@ -62,7 +62,7 @@ jobs:
           v() { [ -f "_site/$1" ] && jq -r .generated_at "_site/$1" || echo ""; }
           jq -n --arg feed "$(v feed.json)" --arg near "$(v near.json)" --arg ar "$(v ar.json)" '{feed: $feed, near: $near, ar: $ar}' > _site/version.json
           cat _site/version.json
-          # Headline text: it travels as an output into an env var; never inline ${{ }} it into a run: script.
+          # Headline text: it travels as an output into an env var; never put it straight into a run script with an expression.
           echo "notify=$(jq -c .notify _site/breaking.json)" >> "$GITHUB_OUTPUT"
 
       # Browsers may reuse app.js and style.css for 10 minutes, so right after a release a page could mix
