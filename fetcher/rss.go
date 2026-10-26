@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -124,23 +125,34 @@ func parseFeed(body []byte) ([]entry, error) {
 	return entries, nil
 }
 
+// A link from a feed is only used when it is a real http(s) web address: feeds are outside data,
+// and anything else (javascript:, data:, a bare word) must never reach an href on the site.
+func webLink(s string) string {
+	s = strings.TrimSpace(s)
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	return s
+}
+
 func pickLink(r xmlItem) string {
 	var fallback string
 	for _, l := range r.Links {
-		if l.Href != "" && (l.Rel == "" || l.Rel == "alternate") {
-			return strings.TrimSpace(l.Href)
+		if h := webLink(l.Href); h != "" && (l.Rel == "" || l.Rel == "alternate") {
+			return h
 		}
-		if t := strings.TrimSpace(l.Text); t != "" && fallback == "" {
+		if t := webLink(l.Text); t != "" && fallback == "" {
 			fallback = t
 		}
 	}
 	if fallback != "" {
 		return fallback
 	}
-	if g := strings.TrimSpace(r.GUID); strings.HasPrefix(g, "http") {
+	if g := webLink(r.GUID); g != "" {
 		return g
 	}
-	if id := strings.TrimSpace(r.ID); strings.HasPrefix(id, "http") {
+	if id := webLink(r.ID); id != "" {
 		return id
 	}
 	return ""
